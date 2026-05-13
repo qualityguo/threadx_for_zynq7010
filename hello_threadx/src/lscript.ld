@@ -287,6 +287,10 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    __undef_stack = .;
 } > ps7_ddr_0
 
+/* ThreadX stack symbols - reuse entire bare-metal stack region */
+_sp = __undef_stack;
+_stack_bottom = _stack_end;
+
 _end = .;
 }
 
