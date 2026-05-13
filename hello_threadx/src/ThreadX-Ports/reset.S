@@ -32,8 +32,11 @@
 
 /* Define the vector area.  This should be located or copied to 0.  */
 
-    .text
-    .global __vectors
+//    .text
+//    .global __vectors
+	.section .vectors, "ax"
+	.align 5
+	.global __vectors
 __vectors:
 
     LDR     pc, STARTUP                     // Reset goes to startup function

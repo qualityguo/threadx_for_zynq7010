@@ -116,6 +116,9 @@ $_tx_initialize_low_level:
     .type   _tx_initialize_low_level,function
 _tx_initialize_low_level:
 
+	/* Save lr(entry mode) before mode switch*/
+	MOV		r12, lr
+
     /* We must be in SVC mode at this point!  */
 
     /* Setup various stack pointers.  */
@@ -164,7 +167,8 @@ _stack_error_loop:
     ADD     r1, r1, #8                          // Increment to next free word
     STR     r1, [r2]                            // Save first free memory address
 
-    PUSH    {lr}
+    //PUSH    {lr}
+    PUSH	{r12}								// Push saved return address(in r12)
 
     /* Setup the vector table.  */
     LDR     r0, =__vectors                      // Get address of vector table

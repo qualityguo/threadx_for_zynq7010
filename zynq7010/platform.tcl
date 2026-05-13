@@ -25,3 +25,6 @@ platform clean
 platform generate
 platform clean
 platform generate
+platform active {zynq7010}
+bsp reload
+platform generate -domains 
