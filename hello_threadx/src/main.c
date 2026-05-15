@@ -7,7 +7,8 @@
 *********************************************************************************************************
 */
 #define  APP_CFG_TASK_START_PRIO                     	2u
-#define  APP_CFG_TASK_PRINT_PRIO						3u
+#define	 APP_CFG_TASK_EVENT_SEND_PRIO					10u					// 优先级更低的发事件标志
+#define  APP_CFG_TASK_EVENT_RECV_PRIO					9u					// 优先级更高的收事件标志
 
 /*
 *********************************************************************************************************
@@ -15,7 +16,8 @@
 *********************************************************************************************************
 */
 #define  APP_CFG_TASK_START_STK_SIZE                    4096u
-#define  APP_CFG_TASK_PRINT_STK_SIZE                    4096u
+#define  APP_CFG_TASK_EVENT_SEND_STK_SIZE               4096u
+#define  APP_CFG_TASK_EVENT_RECV_STK_SIZE               4096u
 
 /*
 *********************************************************************************************************
@@ -24,8 +26,10 @@
 */
 static  TX_THREAD   AppTaskStartTCB;
 static  uint64_t    AppTaskStartStk[APP_CFG_TASK_START_STK_SIZE/8];
-static  TX_THREAD   AppTaskPrintTCB;
-static  uint64_t    AppTaskPrintStk[APP_CFG_TASK_PRINT_STK_SIZE/8];
+static  TX_THREAD   AppTaskEventSendTCB;
+static  uint64_t    AppTaskEventSendStk[APP_CFG_TASK_EVENT_SEND_STK_SIZE/8];
+static  TX_THREAD   AppTaskEventRecvTCB;
+static  uint64_t    AppTaskEventRecvStk[APP_CFG_TASK_EVENT_RECV_STK_SIZE/8];
 
 /*
 *********************************************************************************************************
@@ -33,6 +37,8 @@ static  uint64_t    AppTaskPrintStk[APP_CFG_TASK_PRINT_STK_SIZE/8];
 *********************************************************************************************************
 */
 static  void  AppTaskStart          (ULONG thread_input);
+static  void  AppTaskEventSend      (ULONG thread_input);
+static  void  AppTaskEventRecv      (ULONG thread_input);
 static  void  AppTaskPrint          (ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
@@ -41,11 +47,23 @@ static 	void  DispTaskInfo			(void);
 
 /*
 *******************************************************************************************************
+*                               		宏
+*******************************************************************************************************
+*/
+#define	EVENT_FLAG_A				(1<<0)
+#define	EVENT_FLAG_B				(1<<1)
+#define	EVENT_FLAG_C				(1<<2)
+#define EVENT_FLAG_ABC				(EVENT_FLAG_A|EVENT_FLAG_B|EVENT_FLAG_C)
+
+/*
+*******************************************************************************************************
 *                               变量
 *******************************************************************************************************
 */
-static TX_MUTEX 	AppPrintfSemp;			/* 用于printf互斥 */
-volatile double 	OSCPUUsage;       	   	/* CPU百分比 */
+static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
+static 	TX_EVENT_FLAGS_GROUP 	my_event_group;			/* 用于测试事件标志 */
+volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
+static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 
 /*
 *********************************************************************************************************
@@ -165,6 +183,73 @@ static  void  AppTaskPrint          (ULONG thread_input)
 
 /*
 *********************************************************************************************************
+*	函 数 名: AppTaskEventSend
+*	功能说明: 设置三个事件标志然后自己挂起
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 10
+*********************************************************************************************************
+*/
+static  void  AppTaskEventSend          (ULONG thread_input)
+{
+	(void)thread_input;
+	UINT status;
+	int step = 0;
+
+	while(1)
+	{
+		App_Printf("生产者步骤:%d\n",step);
+		switch(step)
+		{
+			case 0:{
+				App_Printf("设置事件标志A\n");
+				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_A, TX_OR);
+				step = 1;
+				break;
+			}
+			case 1:{
+				App_Printf("设置事件标志B\n");
+				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_B, TX_OR);
+				step = 2;
+				break;
+			}
+			case 2:{
+				App_Printf("设置事件标志C\n");
+				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_C, TX_OR);
+				step = 0;
+				break;
+			}
+		}
+		/* 延时5s */
+		tx_thread_sleep(500);
+
+	}
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskEventRecv
+*	功能说明: 等待三个事件标志然后自己挂起
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 9
+*********************************************************************************************************
+*/
+static  void  AppTaskEventRecv          (ULONG thread_input)
+{
+	(void)thread_input;
+	UINT status;
+
+	while(1)
+	{
+		App_Printf("消费者:等待ABD全部设置\n");
+		status =  tx_event_flags_get(&my_event_group, EVENT_FLAG_ABC, TX_AND_CLEAR, &event_flags_value, TX_WAIT_FOREVER);
+		App_Printf("消费者:ABD已经全部设置\n");
+	}
+}
+
+/*
+*********************************************************************************************************
 *	函 数 名: AppTaskCreate
 *	功能说明: 创建应用任务
 *	形    参: 无
@@ -173,15 +258,26 @@ static  void  AppTaskPrint          (ULONG thread_input)
 */
 static  void  AppTaskCreate (void)
 {
-	/**************创建打印任务*********************/
-	tx_thread_create(&AppTaskPrintTCB,               	/* 任务控制块地址 */
-					  "App Task Print",              	/* 任务名 */
-					  AppTaskPrint,                  	/* 启动任务函数地址 */
+	/**************创建事件标志发送任务*********************/
+	tx_thread_create(&AppTaskEventSendTCB,              /* 任务控制块地址 */
+					  "App Task Event Send",            /* 任务名 */
+					  AppTaskEventSend,                 /* 启动任务函数地址 */
 					  0,                             	/* 传递给任务的参数 */
-					  &AppTaskPrintStk[0],            	/* 堆栈基地址 */
-					  APP_CFG_TASK_PRINT_STK_SIZE,    	/* 堆栈空间大小 */
-					  APP_CFG_TASK_PRINT_PRIO,        	/* 任务优先级*/
-					  APP_CFG_TASK_PRINT_PRIO,        	/* 任务抢占阀值 */
+					  &AppTaskEventSendStk[0],          /* 堆栈基地址 */
+					  APP_CFG_TASK_EVENT_SEND_STK_SIZE, /* 堆栈空间大小 */
+					  APP_CFG_TASK_EVENT_SEND_PRIO,     /* 任务优先级*/
+					  APP_CFG_TASK_EVENT_SEND_PRIO,     /* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建事件标志接收任务*********************/
+	tx_thread_create(&AppTaskEventRecvTCB,              /* 任务控制块地址 */
+					  "App Task Event Recv",            /* 任务名 */
+					  AppTaskEventRecv,                 /* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskEventRecvStk[0],          /* 堆栈基地址 */
+					  APP_CFG_TASK_EVENT_RECV_STK_SIZE, /* 堆栈空间大小 */
+					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务优先级*/
+					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
 }
@@ -198,6 +294,8 @@ static  void  AppObjCreate (void)
 {
 	/* 创建互斥信号量 */
 	tx_mutex_create(&AppPrintfSemp,"AppPrintfSemp",TX_NO_INHERIT);
+	/* 创建事件标志组 */
+	tx_event_flags_create(&my_event_group, "my_event_group");
 }
 
 /*
