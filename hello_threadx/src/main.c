@@ -44,7 +44,7 @@ static 	void  DispTaskInfo			(void);
 *                               变量
 *******************************************************************************************************
 */
-static  TX_MUTEX   	AppPrintfSemp;			/* 用于printf互斥 */
+static TX_MUTEX 	AppPrintfSemp;			/* 用于printf互斥 */
 volatile double 	OSCPUUsage;       	   	/* CPU百分比 */
 
 /*
@@ -225,7 +225,7 @@ static  void  App_Printf(const char *fmt, ...)
 	/* 互斥操作 */
     tx_mutex_get(&AppPrintfSemp, TX_WAIT_FOREVER);
 
-    printf("%s", buf_str);
+    app_printf("%s", buf_str);
 
     tx_mutex_put(&AppPrintfSemp);
 }
@@ -245,17 +245,17 @@ static void DispTaskInfo(void)
     p_tcb = &AppTaskStartTCB;
 
 	/* 打印标题 */
-	App_Printf("===============================================================\r\n");
-	App_Printf("CPU利用率 = %5.2f%%\r\n", OSCPUUsage);
-	App_Printf("任务执行时间 = %.9fs\r\n", (double)_tx_execution_thread_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("空闲执行时间 = %.9fs\r\n", (double)_tx_execution_idle_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("中断执行时间 = %.9fs\r\n", (double)_tx_execution_isr_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("系统总执行时间 = %.9fs\r\n", (double)(_tx_execution_thread_time_total + \
+    App_Printf("===============================================================\r\n");
+    App_Printf("CPU利用率 = %5.2f%%\r\n", OSCPUUsage);
+    App_Printf("任务执行时间 = %.9fs\r\n", (double)_tx_execution_thread_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("空闲执行时间 = %.9fs\r\n", (double)_tx_execution_idle_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("中断执行时间 = %.9fs\r\n", (double)_tx_execution_isr_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("系统总执行时间 = %.9fs\r\n", (double)(_tx_execution_thread_time_total + \
 		                                               _tx_execution_idle_time_total +  \
 	                                                   _tx_execution_isr_time_total)/GTC_CLK_FREQ_HZ);
-	App_Printf("===============================================================\r\n");
-	App_Printf(" 任务优先级 任务栈大小 当前使用栈  最大栈使用   任务名\r\n");
-	App_Printf("   Prio     StackSize   CurStack    MaxStack   Taskname\r\n");
+    App_Printf("===============================================================\r\n");
+    App_Printf(" 任务优先级 任务栈大小 当前使用栈  最大栈使用   任务名\r\n");
+    App_Printf("   Prio     StackSize   CurStack    MaxStack   Taskname\r\n");
 
 	/* 遍历任务控制列表TCB list)，打印所有的任务的优先级和名称 */
 	while (p_tcb != (TX_THREAD *)0)

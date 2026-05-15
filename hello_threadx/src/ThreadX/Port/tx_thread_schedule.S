@@ -113,7 +113,14 @@ __tx_thread_schedule_loop:
 
     LDR     r0, [r1]                        // Pickup next thread to execute
     CMP     r0, #0                          // Is it NULL?
-    BEQ     __tx_thread_schedule_loop       // If so, keep looking for a thread
+    BNE     __tx_thread_have_thread         // If not NULL, we have a thread
+
+    DSB
+    WFI
+    ISB
+    B		__tx_thread_schedule_loop		// Loop back to check for thread
+
+__tx_thread_have_thread:
     /* Yes! We have a thread to execute.  Lockout interrupts and
        transfer control to it.  */
 
