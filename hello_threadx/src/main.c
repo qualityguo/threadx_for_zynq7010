@@ -75,7 +75,7 @@ static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 */
 int main()
 {
-	xil_printf("Hello Threadx\n\r");
+	App_Printf("Hello Threadx\n\r");
 
 	bsp_init();
 
@@ -220,8 +220,8 @@ static  void  AppTaskEventSend          (ULONG thread_input)
 				break;
 			}
 		}
-		/* 延时5s */
-		tx_thread_sleep(500);
+		/* 延时2s */
+		tx_thread_sleep(200);
 
 	}
 }

@@ -202,7 +202,8 @@ _stack_error_loop:
     BL      setIntPriority
 
     // Configure Timer
-    MOV     r0, #0xF0000
+    //MOV     r0, #0xF0000
+    LDR 	r0, =3333333					// fix tick value
     MOV     r1, #0x0
     BL      init_private_timer
     BL      start_private_timer
