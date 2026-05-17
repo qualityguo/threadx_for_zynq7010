@@ -30,3 +30,6 @@ logs/
 
 # Lock files
 .lock
+
+# claude
+.claude

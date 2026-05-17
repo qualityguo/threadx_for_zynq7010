@@ -73,7 +73,7 @@
 
 
 /* 用于使能栈检测，默认是关闭的。此选项使能后，而TX_DISABLE_STACK_FILLING没使能时，栈填充将开启，方便栈检测 */
-//#define TX_ENABLE_STACK_CHECKING
+#define TX_ENABLE_STACK_CHECKING
 
 
 /* 用于设置是否关闭抢占阀值，默认是开启的。如果应用程序不需要此功能，关闭后可以降低代码需求，提升性能 */
@@ -141,7 +141,7 @@
 //#define TX_TIMER_ENABLE_PERFORMANCE_INFO
 
 /* 启动FIQ支持 */
-#define TX_ENABLE_FIQ_SUPPORT
+//#define TX_ENABLE_FIQ_SUPPORT
 
 /* 使能性能测试 */
 #define TX_EXECUTION_PROFILE_ENABLE

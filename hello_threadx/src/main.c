@@ -7,7 +7,10 @@
 *********************************************************************************************************
 */
 #define  APP_CFG_TASK_START_PRIO                     	2u
-#define  APP_CFG_TASK_PRINT_PRIO						3u
+#define	 APP_CFG_TASK_EVENT_SEND_PRIO					10u					// 优先级更低的发事件标志
+#define  APP_CFG_TASK_EVENT_RECV_PRIO					9u					// 优先级更高的收事件标志
+#define	 APP_CFG_TASK_LED_PRIO							20u					// LED闪烁任务
+#define  APP_CFG_TASK_KEY_PRIO							21u					// KEY任务
 
 /*
 *********************************************************************************************************
@@ -15,7 +18,10 @@
 *********************************************************************************************************
 */
 #define  APP_CFG_TASK_START_STK_SIZE                    4096u
-#define  APP_CFG_TASK_PRINT_STK_SIZE                    4096u
+#define  APP_CFG_TASK_EVENT_SEND_STK_SIZE               4096u
+#define  APP_CFG_TASK_EVENT_RECV_STK_SIZE               4096u
+#define	 APP_CFG_TASK_LED_STK_SIZE						1024u
+#define	 APP_CFG_TASK_KEY_STK_SIZE						4096u
 
 /*
 *********************************************************************************************************
@@ -24,8 +30,14 @@
 */
 static  TX_THREAD   AppTaskStartTCB;
 static  uint64_t    AppTaskStartStk[APP_CFG_TASK_START_STK_SIZE/8];
-static  TX_THREAD   AppTaskPrintTCB;
-static  uint64_t    AppTaskPrintStk[APP_CFG_TASK_PRINT_STK_SIZE/8];
+static  TX_THREAD   AppTaskEventSendTCB;
+static  uint64_t    AppTaskEventSendStk[APP_CFG_TASK_EVENT_SEND_STK_SIZE/8];
+static  TX_THREAD   AppTaskEventRecvTCB;
+static  uint64_t    AppTaskEventRecvStk[APP_CFG_TASK_EVENT_RECV_STK_SIZE/8];
+static  TX_THREAD   AppTaskLEDTCB;
+static  uint64_t    AppTaskLEDStk[APP_CFG_TASK_LED_STK_SIZE/8];
+static  TX_THREAD   AppTaskKEYTCB;
+static  uint64_t    AppTaskKEYStk[APP_CFG_TASK_KEY_STK_SIZE/8];
 
 /*
 *********************************************************************************************************
@@ -33,7 +45,10 @@ static  uint64_t    AppTaskPrintStk[APP_CFG_TASK_PRINT_STK_SIZE/8];
 *********************************************************************************************************
 */
 static  void  AppTaskStart          (ULONG thread_input);
-static  void  AppTaskPrint          (ULONG thread_input);
+static  void  AppTaskEventSend      (ULONG thread_input);
+static  void  AppTaskEventRecv      (ULONG thread_input);
+static	void  AppTaskLED			(ULONG thread_input);
+static	void  AppTaskKEY			(ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
@@ -41,11 +56,23 @@ static 	void  DispTaskInfo			(void);
 
 /*
 *******************************************************************************************************
+*                               		宏
+*******************************************************************************************************
+*/
+#define	EVENT_FLAG_A				(1<<0)
+#define	EVENT_FLAG_B				(1<<1)
+#define	EVENT_FLAG_C				(1<<2)
+#define EVENT_FLAG_ABC				(EVENT_FLAG_A|EVENT_FLAG_B|EVENT_FLAG_C)
+
+/*
+*******************************************************************************************************
 *                               变量
 *******************************************************************************************************
 */
-static  TX_MUTEX   	AppPrintfSemp;			/* 用于printf互斥 */
-volatile double 	OSCPUUsage;       	   	/* CPU百分比 */
+static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
+static 	TX_EVENT_FLAGS_GROUP 	my_event_group;			/* 用于测试事件标志 */
+volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
+static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 
 /*
 *********************************************************************************************************
@@ -57,8 +84,9 @@ volatile double 	OSCPUUsage;       	   	/* CPU百分比 */
 */
 int main()
 {
-	xil_printf("Hello Threadx\n\r");
+	App_Printf("Hello Threadx\n\r");
 
+	board_init();
 	bsp_init();
 
 	tx_kernel_enter();
@@ -145,23 +173,129 @@ static  void  AppTaskStart (ULONG thread_input)
 
 /*
 *********************************************************************************************************
-*	函 数 名: AppTaskPrint
-*	功能说明: 启动任务。
+*	函 数 名: AppTaskEventSend
+*	功能说明: 设置三个事件标志然后自己挂起
 *	形    参: thread_input 是在创建该任务时传递的形参
 *	返 回 值: 无
-	优 先 级: 3
+	优 先 级: 10
 *********************************************************************************************************
 */
-static  void  AppTaskPrint          (ULONG thread_input)
+static  void  AppTaskEventSend          (ULONG thread_input)
 {
 	(void)thread_input;
+//	UINT status;
+	int step = 0;
 
 	while(1)
 	{
-		DispTaskInfo();
-		tx_thread_sleep(1);
+		App_Printf("生产者步骤:%d\n",step);
+		switch(step)
+		{
+			case 0:{
+				App_Printf("设置事件标志A\n");
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_A, TX_OR);
+				step = 1;
+				break;
+			}
+			case 1:{
+				App_Printf("设置事件标志B\n");
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_B, TX_OR);
+				step = 2;
+				break;
+			}
+			case 2:{
+				App_Printf("设置事件标志C\n");
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_C, TX_OR);
+				step = 0;
+				break;
+			}
+		}
+		/* 延时10s */
+		tx_thread_sleep(1000);
+
 	}
 }
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskEventRecv
+*	功能说明: 等待三个事件标志然后自己挂起
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 9
+*********************************************************************************************************
+*/
+static  void  AppTaskEventRecv          (ULONG thread_input)
+{
+	(void)thread_input;
+//	UINT status;
+
+	while(1)
+	{
+		App_Printf("消费者:等待ABD全部设置\n");
+		tx_event_flags_get(&my_event_group, EVENT_FLAG_ABC, TX_AND_CLEAR, &event_flags_value, TX_WAIT_FOREVER);
+		App_Printf("消费者:ABD已经全部设置\n");
+	}
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskLED
+*	功能说明: LED闪烁
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 20
+*********************************************************************************************************
+*/
+static  void  AppTaskLED          (ULONG thread_input)
+{
+	(void)thread_input;
+//	UINT status;
+	struct device *pled0 = device_find("led0");
+	struct device *pled1 = device_find("led1");
+	uint8_t val = 1;
+
+
+	while(1)
+	{
+		device_write(pled0, &val, 1);
+		device_write(pled1, &val, 1);
+		val = (val==1)? 0 : 1;
+		/* 延时2s */
+		tx_thread_sleep(200);
+	}
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskKEY
+*	功能说明: 按键打印信息
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 9
+*********************************************************************************************************
+*/
+static  void  AppTaskKEY          (ULONG thread_input)
+{
+	(void)thread_input;
+//	UINT status;
+	struct device *pkey0 = device_find("key0");
+	struct device *pkey1 = device_find("key1");
+	uint8_t val = 0;
+
+
+	while(1)
+	{
+		device_read(pkey1, &val, 1);
+		if(val == 1)
+		{
+			DispTaskInfo();
+		}
+		/* 延时2s */
+		tx_thread_sleep(200);
+	}
+}
+
 
 /*
 *********************************************************************************************************
@@ -173,15 +307,48 @@ static  void  AppTaskPrint          (ULONG thread_input)
 */
 static  void  AppTaskCreate (void)
 {
-	/**************创建打印任务*********************/
-	tx_thread_create(&AppTaskPrintTCB,               	/* 任务控制块地址 */
-					  "App Task Print",              	/* 任务名 */
-					  AppTaskPrint,                  	/* 启动任务函数地址 */
+	/**************创建事件标志发送任务*********************/
+	tx_thread_create(&AppTaskEventSendTCB,              /* 任务控制块地址 */
+					  "App Task Event Send",            /* 任务名 */
+					  AppTaskEventSend,                 /* 启动任务函数地址 */
 					  0,                             	/* 传递给任务的参数 */
-					  &AppTaskPrintStk[0],            	/* 堆栈基地址 */
-					  APP_CFG_TASK_PRINT_STK_SIZE,    	/* 堆栈空间大小 */
-					  APP_CFG_TASK_PRINT_PRIO,        	/* 任务优先级*/
-					  APP_CFG_TASK_PRINT_PRIO,        	/* 任务抢占阀值 */
+					  &AppTaskEventSendStk[0],          /* 堆栈基地址 */
+					  APP_CFG_TASK_EVENT_SEND_STK_SIZE, /* 堆栈空间大小 */
+					  APP_CFG_TASK_EVENT_SEND_PRIO,     /* 任务优先级*/
+					  APP_CFG_TASK_EVENT_SEND_PRIO,     /* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建事件标志接收任务*********************/
+	tx_thread_create(&AppTaskEventRecvTCB,              /* 任务控制块地址 */
+					  "App Task Event Recv",            /* 任务名 */
+					  AppTaskEventRecv,                 /* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskEventRecvStk[0],          /* 堆栈基地址 */
+					  APP_CFG_TASK_EVENT_RECV_STK_SIZE, /* 堆栈空间大小 */
+					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务优先级*/
+					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建LED闪烁任务*********************/
+	tx_thread_create(&AppTaskLEDTCB,	              	/* 任务控制块地址 */
+					  "App Task LED",		            /* 任务名 */
+					  AppTaskLED,                 		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskLEDStk[0],		        /* 堆栈基地址 */
+					  APP_CFG_TASK_LED_STK_SIZE, 		/* 堆栈空间大小 */
+					  APP_CFG_TASK_LED_PRIO,     		/* 任务优先级*/
+					  APP_CFG_TASK_LED_PRIO,    	 	/* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建KEY任务*********************/
+	tx_thread_create(&AppTaskKEYTCB,	              	/* 任务控制块地址 */
+					  "App Task KEY",		            /* 任务名 */
+					  AppTaskKEY,                 		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskKEYStk[0],		        /* 堆栈基地址 */
+					  APP_CFG_TASK_KEY_STK_SIZE, 		/* 堆栈空间大小 */
+					  APP_CFG_TASK_KEY_PRIO,     		/* 任务优先级*/
+					  APP_CFG_TASK_KEY_PRIO,    	 	/* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
 }
@@ -198,6 +365,8 @@ static  void  AppObjCreate (void)
 {
 	/* 创建互斥信号量 */
 	tx_mutex_create(&AppPrintfSemp,"AppPrintfSemp",TX_NO_INHERIT);
+	/* 创建事件标志组 */
+	tx_event_flags_create(&my_event_group, "my_event_group");
 }
 
 /*
@@ -225,7 +394,7 @@ static  void  App_Printf(const char *fmt, ...)
 	/* 互斥操作 */
     tx_mutex_get(&AppPrintfSemp, TX_WAIT_FOREVER);
 
-    printf("%s", buf_str);
+    app_printf("%s", buf_str);
 
     tx_mutex_put(&AppPrintfSemp);
 }
@@ -245,17 +414,17 @@ static void DispTaskInfo(void)
     p_tcb = &AppTaskStartTCB;
 
 	/* 打印标题 */
-	App_Printf("===============================================================\r\n");
-	App_Printf("CPU利用率 = %5.2f%%\r\n", OSCPUUsage);
-	App_Printf("任务执行时间 = %.9fs\r\n", (double)_tx_execution_thread_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("空闲执行时间 = %.9fs\r\n", (double)_tx_execution_idle_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("中断执行时间 = %.9fs\r\n", (double)_tx_execution_isr_time_total/GTC_CLK_FREQ_HZ);
-	App_Printf("系统总执行时间 = %.9fs\r\n", (double)(_tx_execution_thread_time_total + \
+    App_Printf("===============================================================\r\n");
+    App_Printf("CPU利用率 = %5.2f%%\r\n", OSCPUUsage);
+    App_Printf("任务执行时间 = %.9fs\r\n", (double)_tx_execution_thread_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("空闲执行时间 = %.9fs\r\n", (double)_tx_execution_idle_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("中断执行时间 = %.9fs\r\n", (double)_tx_execution_isr_time_total/GTC_CLK_FREQ_HZ);
+    App_Printf("系统总执行时间 = %.9fs\r\n", (double)(_tx_execution_thread_time_total + \
 		                                               _tx_execution_idle_time_total +  \
 	                                                   _tx_execution_isr_time_total)/GTC_CLK_FREQ_HZ);
-	App_Printf("===============================================================\r\n");
-	App_Printf(" 任务优先级 任务栈大小 当前使用栈  最大栈使用   任务名\r\n");
-	App_Printf("   Prio     StackSize   CurStack    MaxStack   Taskname\r\n");
+    App_Printf("===============================================================\r\n");
+    App_Printf(" 任务优先级 任务栈大小 当前使用栈  最大栈使用   任务名\r\n");
+    App_Printf("   Prio     StackSize   CurStack    MaxStack   Taskname\r\n");
 
 	/* 遍历任务控制列表TCB list)，打印所有的任务的优先级和名称 */
 	while (p_tcb != (TX_THREAD *)0)
