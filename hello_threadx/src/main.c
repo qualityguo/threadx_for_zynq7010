@@ -21,7 +21,7 @@
 #define  APP_CFG_TASK_EVENT_SEND_STK_SIZE               4096u
 #define  APP_CFG_TASK_EVENT_RECV_STK_SIZE               4096u
 #define	 APP_CFG_TASK_LED_STK_SIZE						1024u
-#define	 APP_CFG_TASK_KEY_STK_SIZE						1024u
+#define	 APP_CFG_TASK_KEY_STK_SIZE						4096u
 
 /*
 *********************************************************************************************************
@@ -290,9 +290,9 @@ static  void  AppTaskKEY          (ULONG thread_input)
 		if(val == 1)
 		{
 			DispTaskInfo();
-			/* —” ±2s */
-			tx_thread_sleep(200);
 		}
+		/* —” ±2s */
+		tx_thread_sleep(200);
 	}
 }
 
