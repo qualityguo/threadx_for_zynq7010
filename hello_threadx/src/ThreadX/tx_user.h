@@ -141,7 +141,7 @@
 //#define TX_TIMER_ENABLE_PERFORMANCE_INFO
 
 /* 启动FIQ支持 */
-#define TX_ENABLE_FIQ_SUPPORT
+//#define TX_ENABLE_FIQ_SUPPORT
 
 /* 使能性能测试 */
 #define TX_EXECUTION_PROFILE_ENABLE

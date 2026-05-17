@@ -47,6 +47,7 @@ SYS_STACK_SIZE  =       1024                    // System stack size
     .global     enableCaches
     .global     init_private_timer
     .global     start_private_timer
+    .global		tx_irq_dispatch
 /* Define the 16-bit Thumb mode veneer for _tx_initialize_low_level for
    applications calling this function from to 16-bit Thumb mode.  */
 
@@ -281,6 +282,8 @@ __tx_irq_processing_return:
 
 by_pass_timer_interrupt:
     MOV     r0, r4
+    BL		tx_irq_dispatch						// dispatch
+    MOV		r0, r4
     BL      writeEOI
     POP     {r4, r5}                            // Recover preserved registers
 
