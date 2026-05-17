@@ -9,6 +9,8 @@
 #define  APP_CFG_TASK_START_PRIO                     	2u
 #define	 APP_CFG_TASK_EVENT_SEND_PRIO					10u					// 优先级更低的发事件标志
 #define  APP_CFG_TASK_EVENT_RECV_PRIO					9u					// 优先级更高的收事件标志
+#define	 APP_CFG_TASK_LED_PRIO							20u					// LED闪烁任务
+#define  APP_CFG_TASK_KEY_PRIO							21u					// KEY任务
 
 /*
 *********************************************************************************************************
@@ -18,6 +20,8 @@
 #define  APP_CFG_TASK_START_STK_SIZE                    4096u
 #define  APP_CFG_TASK_EVENT_SEND_STK_SIZE               4096u
 #define  APP_CFG_TASK_EVENT_RECV_STK_SIZE               4096u
+#define	 APP_CFG_TASK_LED_STK_SIZE						1024u
+#define	 APP_CFG_TASK_KEY_STK_SIZE						1024u
 
 /*
 *********************************************************************************************************
@@ -30,6 +34,10 @@ static  TX_THREAD   AppTaskEventSendTCB;
 static  uint64_t    AppTaskEventSendStk[APP_CFG_TASK_EVENT_SEND_STK_SIZE/8];
 static  TX_THREAD   AppTaskEventRecvTCB;
 static  uint64_t    AppTaskEventRecvStk[APP_CFG_TASK_EVENT_RECV_STK_SIZE/8];
+static  TX_THREAD   AppTaskLEDTCB;
+static  uint64_t    AppTaskLEDStk[APP_CFG_TASK_LED_STK_SIZE/8];
+static  TX_THREAD   AppTaskKEYTCB;
+static  uint64_t    AppTaskKEYStk[APP_CFG_TASK_KEY_STK_SIZE/8];
 
 /*
 *********************************************************************************************************
@@ -39,7 +47,8 @@ static  uint64_t    AppTaskEventRecvStk[APP_CFG_TASK_EVENT_RECV_STK_SIZE/8];
 static  void  AppTaskStart          (ULONG thread_input);
 static  void  AppTaskEventSend      (ULONG thread_input);
 static  void  AppTaskEventRecv      (ULONG thread_input);
-static  void  AppTaskPrint          (ULONG thread_input);
+static	void  AppTaskLED			(ULONG thread_input);
+static	void  AppTaskKEY			(ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
@@ -77,6 +86,7 @@ int main()
 {
 	App_Printf("Hello Threadx\n\r");
 
+	board_init();
 	bsp_init();
 
 	tx_kernel_enter();
@@ -163,26 +173,6 @@ static  void  AppTaskStart (ULONG thread_input)
 
 /*
 *********************************************************************************************************
-*	函 数 名: AppTaskPrint
-*	功能说明: 启动任务。
-*	形    参: thread_input 是在创建该任务时传递的形参
-*	返 回 值: 无
-	优 先 级: 3
-*********************************************************************************************************
-*/
-static  void  AppTaskPrint          (ULONG thread_input)
-{
-	(void)thread_input;
-
-	while(1)
-	{
-		DispTaskInfo();
-		tx_thread_sleep(1);
-	}
-}
-
-/*
-*********************************************************************************************************
 *	函 数 名: AppTaskEventSend
 *	功能说明: 设置三个事件标志然后自己挂起
 *	形    参: thread_input 是在创建该任务时传递的形参
@@ -193,7 +183,7 @@ static  void  AppTaskPrint          (ULONG thread_input)
 static  void  AppTaskEventSend          (ULONG thread_input)
 {
 	(void)thread_input;
-	UINT status;
+//	UINT status;
 	int step = 0;
 
 	while(1)
@@ -203,25 +193,25 @@ static  void  AppTaskEventSend          (ULONG thread_input)
 		{
 			case 0:{
 				App_Printf("设置事件标志A\n");
-				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_A, TX_OR);
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_A, TX_OR);
 				step = 1;
 				break;
 			}
 			case 1:{
 				App_Printf("设置事件标志B\n");
-				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_B, TX_OR);
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_B, TX_OR);
 				step = 2;
 				break;
 			}
 			case 2:{
 				App_Printf("设置事件标志C\n");
-				status = tx_event_flags_set(&my_event_group, EVENT_FLAG_C, TX_OR);
+				tx_event_flags_set(&my_event_group, EVENT_FLAG_C, TX_OR);
 				step = 0;
 				break;
 			}
 		}
-		/* 延时2s */
-		tx_thread_sleep(200);
+		/* 延时10s */
+		tx_thread_sleep(1000);
 
 	}
 }
@@ -238,15 +228,74 @@ static  void  AppTaskEventSend          (ULONG thread_input)
 static  void  AppTaskEventRecv          (ULONG thread_input)
 {
 	(void)thread_input;
-	UINT status;
+//	UINT status;
 
 	while(1)
 	{
 		App_Printf("消费者:等待ABD全部设置\n");
-		status =  tx_event_flags_get(&my_event_group, EVENT_FLAG_ABC, TX_AND_CLEAR, &event_flags_value, TX_WAIT_FOREVER);
+		tx_event_flags_get(&my_event_group, EVENT_FLAG_ABC, TX_AND_CLEAR, &event_flags_value, TX_WAIT_FOREVER);
 		App_Printf("消费者:ABD已经全部设置\n");
 	}
 }
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskLED
+*	功能说明: LED闪烁
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 20
+*********************************************************************************************************
+*/
+static  void  AppTaskLED          (ULONG thread_input)
+{
+	(void)thread_input;
+//	UINT status;
+	struct device *pled0 = device_find("led0");
+	struct device *pled1 = device_find("led1");
+	uint8_t val = 1;
+
+
+	while(1)
+	{
+		device_write(pled0, &val, 1);
+		device_write(pled1, &val, 1);
+		val = (val==1)? 0 : 1;
+		/* 延时2s */
+		tx_thread_sleep(200);
+	}
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskKEY
+*	功能说明: 按键打印信息
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 9
+*********************************************************************************************************
+*/
+static  void  AppTaskKEY          (ULONG thread_input)
+{
+	(void)thread_input;
+//	UINT status;
+	struct device *pkey0 = device_find("key0");
+	struct device *pkey1 = device_find("key1");
+	uint8_t val = 0;
+
+
+	while(1)
+	{
+		device_read(pkey1, &val, 1);
+		if(val == 1)
+		{
+			DispTaskInfo();
+			/* 延时2s */
+			tx_thread_sleep(200);
+		}
+	}
+}
+
 
 /*
 *********************************************************************************************************
@@ -278,6 +327,28 @@ static  void  AppTaskCreate (void)
 					  APP_CFG_TASK_EVENT_RECV_STK_SIZE, /* 堆栈空间大小 */
 					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务优先级*/
 					  APP_CFG_TASK_EVENT_RECV_PRIO,     /* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建LED闪烁任务*********************/
+	tx_thread_create(&AppTaskLEDTCB,	              	/* 任务控制块地址 */
+					  "App Task LED",		            /* 任务名 */
+					  AppTaskLED,                 		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskLEDStk[0],		        /* 堆栈基地址 */
+					  APP_CFG_TASK_LED_STK_SIZE, 		/* 堆栈空间大小 */
+					  APP_CFG_TASK_LED_PRIO,     		/* 任务优先级*/
+					  APP_CFG_TASK_LED_PRIO,    	 	/* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建KEY任务*********************/
+	tx_thread_create(&AppTaskKEYTCB,	              	/* 任务控制块地址 */
+					  "App Task KEY",		            /* 任务名 */
+					  AppTaskKEY,                 		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskKEYStk[0],		        /* 堆栈基地址 */
+					  APP_CFG_TASK_KEY_STK_SIZE, 		/* 堆栈空间大小 */
+					  APP_CFG_TASK_KEY_PRIO,     		/* 任务优先级*/
+					  APP_CFG_TASK_KEY_PRIO,    	 	/* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
 }

@@ -4,7 +4,7 @@
  * 整体结构:
  * 	device_core.h/c		核心层
  * 	ioctl_cmd.h			命令定义
- * 	xxx_driver.h/c		各种外设实现
+ * 	xxx_driver.c		各种外设实现
  * 	board_init.c		集中注册和初始化
  *
  * 如何新增一个外设:
@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+
+struct device;
 
 /* ------------------------------------------------------------------ */
 /*                        通知回调 - 中断中回调通知上层                                                                  */
