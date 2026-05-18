@@ -185,7 +185,7 @@ _stack_error_loop:
     //
     // Enable Private Timer for periodic IRQ
     // --------------------------------------
-    MOV     r0, #0x1F
+    MOV     r0, #0xF0
     BL      setPriorityMask               // Set priority mask (local)
 
     // [EL] Change start - don't enable interrupts here!  
@@ -279,10 +279,13 @@ __tx_irq_processing_return:
        before the timer interrupt handler could be called.  */
 
     BL     _tx_timer_interrupt                  // Timer interrupt handler
+    B	   after_irq_dispatch					// skip tx_irq_dispatch for timer
 
 by_pass_timer_interrupt:
     MOV     r0, r4
     BL		tx_irq_dispatch						// dispatch
+
+after_irq_dispatch:
     MOV		r0, r4
     BL      writeEOI
     POP     {r4, r5}                            // Recover preserved registers

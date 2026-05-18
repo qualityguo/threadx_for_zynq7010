@@ -71,6 +71,7 @@ static 	void  DispTaskInfo			(void);
 */
 static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
 static 	TX_EVENT_FLAGS_GROUP 	my_event_group;			/* 用于测试事件标志 */
+static  TX_SEMAPHORE			my_key_semaphore;		/* key通知的信号量 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
 static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 
@@ -86,8 +87,8 @@ int main()
 {
 	App_Printf("Hello Threadx\n\r");
 
-	board_init();
 	bsp_init();
+	board_init();
 
 	tx_kernel_enter();
 
@@ -275,6 +276,12 @@ static  void  AppTaskLED          (ULONG thread_input)
 	优 先 级: 9
 *********************************************************************************************************
 */
+void key1_cb(struct device *dev, uint32_t event)
+{
+	tx_semaphore_put(&my_key_semaphore);
+}
+
+
 static  void  AppTaskKEY          (ULONG thread_input)
 {
 	(void)thread_input;
@@ -283,9 +290,13 @@ static  void  AppTaskKEY          (ULONG thread_input)
 	struct device *pkey1 = device_find("key1");
 	uint8_t val = 0;
 
+	device_ioctl(pkey1, DEV_IOCTL_SET_NOTIFY, key1_cb);
+
 
 	while(1)
 	{
+		tx_semaphore_get(&my_key_semaphore, TX_WAIT_FOREVER);		// 等待中断的通知
+
 		device_read(pkey1, &val, 1);
 		if(val == 1)
 		{
@@ -367,6 +378,8 @@ static  void  AppObjCreate (void)
 	tx_mutex_create(&AppPrintfSemp,"AppPrintfSemp",TX_NO_INHERIT);
 	/* 创建事件标志组 */
 	tx_event_flags_create(&my_event_group, "my_event_group");
+	/* 创建信号量 */
+	tx_semaphore_create(&my_key_semaphore, "mykeysem", 0);
 }
 
 /*
