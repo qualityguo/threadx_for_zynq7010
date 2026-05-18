@@ -297,13 +297,15 @@ static  void  AppTaskKEY          (ULONG thread_input)
 	{
 		tx_semaphore_get(&my_key_semaphore, TX_WAIT_FOREVER);		// 等待中断的通知
 
+		tx_thread_sleep(2);				// 延时20ms-消抖
+
 		device_read(pkey1, &val, 1);
 		if(val == 1)
 		{
 			DispTaskInfo();
 		}
 		/* 延时2s */
-		tx_thread_sleep(200);
+//		tx_thread_sleep(200);
 	}
 }
 
