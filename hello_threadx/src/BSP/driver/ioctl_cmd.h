@@ -19,5 +19,13 @@
 /* ------------------------------------------------------------------ */
 #define KEY_IOCTL_GET_STATE				0x0201
 
+/* ------------------------------------------------------------------ */
+/*                              UART (0x03XX)                          */
+/* ------------------------------------------------------------------ */
+#define UART_IOCTL_SET_BAUD_RATE		0x0301
+#define UART_IOCTL_SET_FORMAT			0x0302
+#define UART_IOCTL_GET_RX_COUNT			0x0303
+#define UART_IOCTL_GET_TX_FREE			0x0304
+
 
 #endif /* __IOCTL_CMD_H_ */

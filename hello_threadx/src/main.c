@@ -11,6 +11,7 @@
 #define  APP_CFG_TASK_KEY_PRIO							21u					// KEY任务
 #define	 APP_CFG_TASK_MSG_RECV_PRIO						19u					// 消息队列接收任务
 #define  APP_CFG_TASK_SEM_RECV_PRIO						18u					// 信号量接收任务
+#define	 APP_CFG_TASK_UART_RECV_PRIO					10u					// 串口接收任务
 
 /*
 *********************************************************************************************************
@@ -22,6 +23,7 @@
 #define	 APP_CFG_TASK_KEY_STK_SIZE						4096u
 #define  APP_CFG_TASK_MSG_RECV_STK_SIZE					1024u
 #define  APP_CFG_TASK_SEM_RECV_STK_SIZE					1024u
+#define  APP_CFG_TASK_UART_RECV_STK_SIZE				4096u
 
 /*
 *********************************************************************************************************
@@ -38,6 +40,8 @@ static  TX_THREAD   AppTaskMsgRecvTCB;
 static  uint64_t    AppTaskMsgRecvStk[APP_CFG_TASK_MSG_RECV_STK_SIZE/8];
 static  TX_THREAD   AppTaskSemRecvTCB;
 static  uint64_t    AppTaskSemRecvStk[APP_CFG_TASK_SEM_RECV_STK_SIZE/8];
+static  TX_THREAD   AppTaskUartRecvTCB;
+static  uint64_t    AppTaskUartRecvStk[APP_CFG_TASK_UART_RECV_STK_SIZE/8];
 
 /*
 *********************************************************************************************************
@@ -49,6 +53,7 @@ static	void  AppTaskLED			(ULONG thread_input);
 static	void  AppTaskKEY			(ULONG thread_input);
 static  void  AppTaskMsgRecv		(ULONG thread_input);
 static  void  AppTaskSemRecv		(ULONG thread_input);
+static  void  AppTaskUartRecv		(ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
@@ -72,9 +77,10 @@ static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
 static  TX_SEMAPHORE			my_semaphore;			/* 任务通知的信号量 */
 static  TX_EVENT_FLAGS_GROUP	key_event_group;		/* key中断通知任务事件标志组 */
 static  TX_QUEUE				my_msg_queue;			/* 任务通信消息队列 */
+static  TX_SEMAPHORE			uart_semaphore;			/* 串口数据达到信号量 */
 static  TX_TIMER  				AppTimer;				/* 软件定时器 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
-static  ULONG 					event_flags_value;		/* 事件标志暂存 */
+
 
 typedef struct Msg
 {
@@ -97,7 +103,7 @@ MSG_T   g_tMsg;                 /* 定义一个结构体用于消息队列数据传递 */
 */
 int main()
 {
-	App_Printf("Hello Threadx\n\r");
+	xil_printf("Hello Threadx!\r\n");
 
 	bsp_init();
 	board_init();
@@ -242,6 +248,7 @@ static  void  AppTaskKEY          (ULONG thread_input)
 	uint8_t val0 = 0;
 //	uint8_t val1 = 0;
 	MSG_T   *ptMsg;
+	static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 
 	device_ioctl(pkey0, DEV_IOCTL_SET_NOTIFY, key0_cb);
 	device_ioctl(pkey1, DEV_IOCTL_SET_NOTIFY, key1_cb);
@@ -277,7 +284,7 @@ static  void  AppTaskKEY          (ULONG thread_input)
 			if(event_flags_value & EVENT_KEY1)			// key1按下发送消息
 			{
 				ptMsg->ucMessageID++;
-				ptMsg->ulData[0]++;;
+				ptMsg->ulData[0]++;
 				ptMsg->usData[0]++;
 				// 发送消息
 				status = tx_queue_send(&my_msg_queue, &ptMsg, 1000);
@@ -355,6 +362,46 @@ static  void  AppTaskSemRecv		(ULONG thread_input)
 
 /*
 *********************************************************************************************************
+*	函 数 名: AppTaskUartRecv
+*	功能说明: 接收串口数据
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 10
+*********************************************************************************************************
+*/
+void uart1_cb(struct device *dev, uint32_t event)
+{
+	tx_semaphore_put(&uart_semaphore);
+}
+
+
+static  void  AppTaskUartRecv		(ULONG thread_input)
+{
+	(void)thread_input;
+	UINT status;
+	struct device *puart1 = device_find("uart1");
+	device_ioctl(puart1, DEV_IOCTL_SET_NOTIFY, uart1_cb);
+	uint8_t tmp_buf[256];			// 大于等于循环缓冲区的长度
+	int n = 0;
+
+	while(1)
+	{
+		status = tx_semaphore_get(&uart_semaphore, TX_WAIT_FOREVER);
+		if(status == TX_SUCCESS)
+		{
+			n = device_read(puart1, tmp_buf, sizeof(tmp_buf));
+			/* 成功接收，打印消息 */
+			App_Printf("接收串口数据，长度:%d\r\n", n);
+			/* 回显 */
+			n = device_write(puart1, tmp_buf, n);
+			App_Printf("发送串口数据，长度:%d\r\n", n);
+		}
+
+	}
+}
+
+/*
+*********************************************************************************************************
 *	函 数 名: AppTaskCreate
 *	功能说明: 创建应用任务
 *	形    参: 无
@@ -407,6 +454,17 @@ static  void  AppTaskCreate (void)
 					  APP_CFG_TASK_SEM_RECV_PRIO,  	 	/* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建Uart-Recv任务*********************/
+	tx_thread_create(&AppTaskUartRecvTCB,              	/* 任务控制块地址 */
+					  "App Task UARTRecv",	            /* 任务名 */
+					  AppTaskUartRecv,              	/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskUartRecvStk[0],	        /* 堆栈基地址 */
+					  APP_CFG_TASK_UART_RECV_STK_SIZE,	/* 堆栈空间大小 */
+					  APP_CFG_TASK_UART_RECV_PRIO,  	/* 任务优先级*/
+					  APP_CFG_TASK_UART_RECV_PRIO,  	/* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
 }
 
 /*
@@ -421,7 +479,7 @@ void TimerCallback(ULONG thread_input)
 {
 	/* 带延迟参数，且设置大于0，都不要在定时组的回调函数里面调用 */
 	static uint8_t led1_val = 1;
-	struct device *pled1 = device_find("led1");
+	struct device *pled1 = device_find("led1");				// 如果为了性能-设置为单次查找
 	device_write(pled1, &led1_val, 1);
 	led1_val = (led1_val==1)? 0 : 1;
 }
@@ -444,6 +502,8 @@ static  void  AppObjCreate (void)
 	tx_queue_create(&my_msg_queue, "my_msg_queue", 1, MessageQueuesBuf1, sizeof(MessageQueuesBuf1));
 	/* 创建信号量 */
 	tx_semaphore_create(&my_semaphore, "mysem", 0);		// 初始0
+	/* 创建信号量 */
+	tx_semaphore_create(&uart_semaphore, "uartsem", 0);		// 初始0
 	/* 创建软件定时器 */
 	tx_timer_create(&AppTimer,
 					"App Timer",
