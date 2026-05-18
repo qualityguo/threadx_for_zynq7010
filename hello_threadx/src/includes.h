@@ -43,6 +43,7 @@
 #include "bsp_init.h"
 #include "board_init.h"
 #include "device_core.h"
+#include "ioctl_cmd.h"
 #include "app_print.h"
 
 /*
