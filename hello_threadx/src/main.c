@@ -10,6 +10,7 @@
 #define	 APP_CFG_TASK_LED_PRIO							20u					// LED闪烁任务
 #define  APP_CFG_TASK_KEY_PRIO							21u					// KEY任务
 #define	 APP_CFG_TASK_MSG_RECV_PRIO						19u					// 消息队列接收任务
+#define  APP_CFG_TASK_SEM_RECV_PRIO						18u					// 信号量接收任务
 
 /*
 *********************************************************************************************************
@@ -20,6 +21,7 @@
 #define	 APP_CFG_TASK_LED_STK_SIZE						1024u
 #define	 APP_CFG_TASK_KEY_STK_SIZE						4096u
 #define  APP_CFG_TASK_MSG_RECV_STK_SIZE					1024u
+#define  APP_CFG_TASK_SEM_RECV_STK_SIZE					1024u
 
 /*
 *********************************************************************************************************
@@ -34,6 +36,8 @@ static  TX_THREAD   AppTaskKEYTCB;
 static  uint64_t    AppTaskKEYStk[APP_CFG_TASK_KEY_STK_SIZE/8];
 static  TX_THREAD   AppTaskMsgRecvTCB;
 static  uint64_t    AppTaskMsgRecvStk[APP_CFG_TASK_MSG_RECV_STK_SIZE/8];
+static  TX_THREAD   AppTaskSemRecvTCB;
+static  uint64_t    AppTaskSemRecvStk[APP_CFG_TASK_SEM_RECV_STK_SIZE/8];
 
 /*
 *********************************************************************************************************
@@ -44,6 +48,7 @@ static  void  AppTaskStart          (ULONG thread_input);
 static	void  AppTaskLED			(ULONG thread_input);
 static	void  AppTaskKEY			(ULONG thread_input);
 static  void  AppTaskMsgRecv		(ULONG thread_input);
+static  void  AppTaskSemRecv		(ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
@@ -64,8 +69,7 @@ static 	void  DispTaskInfo			(void);
 *******************************************************************************************************
 */
 static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
-//static  TX_SEMAPHORE			my_key0_semaphore;		/* key通知的信号量 */
-//static  TX_SEMAPHORE			my_key1_semaphore;		/* key通知的信号量 */
+static  TX_SEMAPHORE			my_semaphore;			/* 任务通知的信号量 */
 static  TX_EVENT_FLAGS_GROUP	key_event_group;		/* key中断通知任务事件标志组 */
 static  TX_QUEUE				my_msg_queue;			/* 任务通信消息队列 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
@@ -280,6 +284,12 @@ static  void  AppTaskKEY          (ULONG thread_input)
 				{
 					App_Printf("K2键按下，向MessageQueues发送数据成功\r\n");
 				}
+				// 释放信号量
+				status = tx_semaphore_put(&my_semaphore);
+				if(status == TX_SUCCESS)
+				{
+					App_Printf("K2键按下，释放信号量成功\r\n");
+				}
 			}
 
 		}
@@ -316,6 +326,31 @@ static  void  AppTaskMsgRecv		(ULONG thread_input)
 	}
 }
 
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskSemRecv
+*	功能说明: 接收信号量
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 18
+*********************************************************************************************************
+*/
+static  void  AppTaskSemRecv		(ULONG thread_input)
+{
+	(void)thread_input;
+	UINT status;
+
+	while(1)
+	{
+		status = tx_semaphore_get(&my_semaphore, TX_WAIT_FOREVER);
+		if(status == TX_SUCCESS)
+		{
+			/* 成功接收，打印消息 */
+			App_Printf("接收到同步信号量\r\n");
+		}
+
+	}
+}
 
 /*
 *********************************************************************************************************
@@ -360,6 +395,17 @@ static  void  AppTaskCreate (void)
 					  APP_CFG_TASK_MSG_RECV_PRIO,  	 	/* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建Sem-Recv任务*********************/
+	tx_thread_create(&AppTaskSemRecvTCB,              	/* 任务控制块地址 */
+					  "App Task SEMRecv",	            /* 任务名 */
+					  AppTaskSemRecv,              		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskSemRecvStk[0],	        /* 堆栈基地址 */
+					  APP_CFG_TASK_SEM_RECV_STK_SIZE,	/* 堆栈空间大小 */
+					  APP_CFG_TASK_SEM_RECV_PRIO,  		/* 任务优先级*/
+					  APP_CFG_TASK_SEM_RECV_PRIO,  	 	/* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
 }
 
 /*
@@ -379,8 +425,7 @@ static  void  AppObjCreate (void)
 	/* 创建消息队列 */
 	tx_queue_create(&my_msg_queue, "my_msg_queue", 1, MessageQueuesBuf1, sizeof(MessageQueuesBuf1));
 	/* 创建信号量 */
-//	tx_semaphore_create(&my_key0_semaphore, "mykey0sem", 0);
-//	tx_semaphore_create(&my_key1_semaphore, "mykey1sem", 0);
+	tx_semaphore_create(&my_semaphore, "mysem", 0);		// 初始0
 }
 
 /*
