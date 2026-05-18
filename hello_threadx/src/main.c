@@ -72,6 +72,7 @@ static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
 static  TX_SEMAPHORE			my_semaphore;			/* 任务通知的信号量 */
 static  TX_EVENT_FLAGS_GROUP	key_event_group;		/* key中断通知任务事件标志组 */
 static  TX_QUEUE				my_msg_queue;			/* 任务通信消息队列 */
+static  TX_TIMER  				AppTimer;				/* 软件定时器 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
 static  ULONG 					event_flags_value;		/* 事件标志暂存 */
 
@@ -197,14 +198,14 @@ static  void  AppTaskLED          (ULONG thread_input)
 	(void)thread_input;
 //	UINT status;
 	struct device *pled0 = device_find("led0");
-	struct device *pled1 = device_find("led1");
+//	struct device *pled1 = device_find("led1");
 	uint8_t val = 1;
 
 
 	while(1)
 	{
 		device_write(pled0, &val, 1);
-		device_write(pled1, &val, 1);
+//		device_write(pled1, &val, 1);
 		val = (val==1)? 0 : 1;
 		/* 延时2s */
 		tx_thread_sleep(200);
@@ -410,6 +411,23 @@ static  void  AppTaskCreate (void)
 
 /*
 *********************************************************************************************************
+*	函 数 名: TimerCallback
+*	功能说明: 定时器组回调函数
+*	形    参: thread_input
+*	返 回 值: 无
+*********************************************************************************************************
+*/
+void TimerCallback(ULONG thread_input)
+{
+	/* 带延迟参数，且设置大于0，都不要在定时组的回调函数里面调用 */
+	static uint8_t led1_val = 1;
+	struct device *pled1 = device_find("led1");
+	device_write(pled1, &led1_val, 1);
+	led1_val = (led1_val==1)? 0 : 1;
+}
+
+/*
+*********************************************************************************************************
 *	函 数 名: AppObjCreate
 *	功能说明: 创建任务通讯
 *	形    参: 无
@@ -426,6 +444,14 @@ static  void  AppObjCreate (void)
 	tx_queue_create(&my_msg_queue, "my_msg_queue", 1, MessageQueuesBuf1, sizeof(MessageQueuesBuf1));
 	/* 创建信号量 */
 	tx_semaphore_create(&my_semaphore, "mysem", 0);		// 初始0
+	/* 创建软件定时器 */
+	tx_timer_create(&AppTimer,
+					"App Timer",
+					TimerCallback,
+					0,                  /* 传递的参数 */
+					100,                /* 设置定时器时间溢出的初始延迟，单位ThreadX系统时间节拍数 */
+					100, 				/* 设置初始延迟后的定时器运行周期，如果设置为0，表示单次定时器 */
+					TX_AUTO_ACTIVATE);	/* 激活定时器 */
 }
 
 /*
