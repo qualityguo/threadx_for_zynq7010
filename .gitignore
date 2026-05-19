@@ -31,8 +31,10 @@ logs/
 # Lock files
 .lock
 
-# claude
-.claude
+# claude (but track skills)
+.claude/*
+!.claude/skills/
 
-# opencode
-.opencode
+# opencode (but track skills)
+.opencode/*
+!.opencode/skills/
