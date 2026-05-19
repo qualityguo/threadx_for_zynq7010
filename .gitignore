@@ -33,3 +33,6 @@ logs/
 
 # claude
 .claude
+
+# opencode
+.opencode
