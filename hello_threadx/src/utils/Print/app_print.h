@@ -9,8 +9,10 @@
 #error "Exactly one of USE_CORESIGHTPS_PRINT, USE_UARTPS0_PRINT, or USE_UARTPS1_PRINT must be defined"
 #endif
 
-/* 线程安全的 */
+/* 线程不安全的 */
 void app_printf(const char *ctrl1, ...);
 
+/* 阻塞读字符 */
+char my_inbyte(void);
 
 #endif /* __APP_PRINT_H_ */

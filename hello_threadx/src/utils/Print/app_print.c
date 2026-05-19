@@ -22,7 +22,7 @@
 
 /* 不同输出的关键 */
 static void my_outbyte(char c);
-static char my_inbyte(void);
+char my_inbyte(void);
 
 static void my_outbyte(char c)
 {
@@ -37,7 +37,7 @@ static void my_outbyte(char c)
 	#endif
 }
 
-static char my_inbyte(void) {
+char my_inbyte(void) {
 	#ifdef USE_CORESIGHTPS_PRINT
 		return XCoresightPs_DccRecvByte(CORESIGHTPS_BASEADDRESS);
 	#endif

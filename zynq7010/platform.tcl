@@ -36,3 +36,8 @@ platform active {zynq7010}
 bsp reload
 bsp reload
 platform generate -domains 
+platform active {zynq7010}
+bsp reload
+platform generate -domains 
+platform clean
+platform generate

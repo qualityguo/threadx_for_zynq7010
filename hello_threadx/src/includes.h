@@ -34,6 +34,7 @@
 */
 #include "tx_api.h"
 #include "tx_timer.h"
+#include "fx_api.h"
 
 /*
 *********************************************************************************************************
@@ -45,6 +46,8 @@
 #include "device_core.h"
 #include "ioctl_cmd.h"
 #include "app_print.h"
+#include "fx_zynq_sdio_driver.h"
+#include "xil_printf.h"
 
 /*
 *********************************************************************************************************

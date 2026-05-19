@@ -27,5 +27,26 @@
 #define UART_IOCTL_GET_RX_COUNT			0x0303
 #define UART_IOCTL_GET_TX_FREE			0x0304
 
+/* ------------------------------------------------------------------ */
+/*                            SD card (0x04XX)                         */
+/* ------------------------------------------------------------------ */
+struct sd_rw_args {
+	uint32_t sector;
+	uint32_t count;
+	void    *buf;
+};
+
+#define SD_IOCTL_READ_SECTORS			0x0401
+#define SD_IOCTL_WRITE_SECTORS			0x0402
+#define SD_IOCTL_GET_SECTOR_COUNT		0x0403
+
+/* ------------------------------------------------------------------ */
+/*                          TTC timer (0x05XX)                         */
+/* ------------------------------------------------------------------ */
+#define TTC_IOCTL_START					0x0501
+#define TTC_IOCTL_STOP					0x0502
+#define TTC_IOCTL_SET_INTERVAL			0x0503
+#define TTC_IOCTL_SET_PRESCALER			0x0504
+#define TTC_IOCTL_GET_COUNTER			0x0505
 
 #endif /* __IOCTL_CMD_H_ */
