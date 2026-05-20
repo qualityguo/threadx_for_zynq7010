@@ -35,12 +35,9 @@ static void uart_ps_init(void)
 
 static void sd_ps_init(void)
 {
-	s32 ret;
 	XSdPs_Config *cfg = XSdPs_LookupConfig(XPAR_PS7_SD_0_DEVICE_ID);
 	XSdPs_CfgInitialize(&g_sd_ps, cfg, cfg->BaseAddress);
-	ret = XSdPs_CardInitialize(&g_sd_ps);
-	xil_printf("SD card init: %s (sectors=%lu)\r\n",
-		   ret == XST_SUCCESS ? "OK" : "FAIL", g_sd_ps.SectorCount);
+	XSdPs_CardInitialize(&g_sd_ps);
 }
 
 void board_init()
