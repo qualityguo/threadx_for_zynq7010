@@ -59,7 +59,6 @@ static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
 static 	void  DispTaskInfo			(void);
 	uint32_t  GetRunTime			(void);
-extern  void  DemoFileX				(char cmd);
 
 /*
 *******************************************************************************************************
@@ -68,7 +67,8 @@ extern  void  DemoFileX				(char cmd);
 */
 #define EVENT_KEY0					(1<<0)
 #define EVENT_KEY1					(1<<1)
-
+#define TRACE_BUFFER_SIZE 			(500 * 32)  		/* 500个事件的存储空间 */
+#define TRACE_MAX_OBJECTS  			20         			/* 最多跟踪的ThreadX对象数量 */
 
 /*
 *******************************************************************************************************
@@ -83,6 +83,8 @@ static  TX_SEMAPHORE			uart_semaphore;			/* 串口数据达到信号量 */
 static  TX_TIMER  				AppTimer;				/* 软件定时器 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
 static  volatile uint32_t		base_time;				/* 低精度时间计数-10ms */
+
+UCHAR 	g_trace_buffer[TRACE_BUFFER_SIZE];				/* 缓冲区对象 */
 
 
 
@@ -176,6 +178,11 @@ static  void  AppTaskStart (ULONG thread_input)
 	/* 计算CPU利用率 */
 	IdleTime = _tx_execution_idle_time_total;
 	TolTime = _tx_execution_thread_time_total + _tx_execution_isr_time_total + _tx_execution_idle_time_total;
+
+	/* 启动任务跟踪 */
+	tx_trace_enable(&g_trace_buffer, 					/* 存储地址 */
+					TRACE_BUFFER_SIZE,					/* buffer大小 */
+					TRACE_MAX_OBJECTS);					/* 对象数量 */
 
     while (1)
 	{
@@ -388,17 +395,18 @@ static  void  AppTaskUartRecv		(ULONG thread_input)
 	UINT status;
 	struct device *puart1 = device_find("uart1");
 	device_ioctl(puart1, DEV_IOCTL_SET_NOTIFY, uart1_cb);
+	int n = 0;
 	uint8_t tmp_buf[256];			// 大于等于循环缓冲区的长度
-	fx_system_initialize();			// 使用FileX必须初始化
-
 
 	while(1)
 	{
 		status = tx_semaphore_get(&uart_semaphore, TX_WAIT_FOREVER);
 		if(status == TX_SUCCESS)
 		{
-			device_read(puart1, tmp_buf, sizeof(tmp_buf));
-			DemoFileX(tmp_buf[0]);
+			n = device_read(puart1, tmp_buf, sizeof(tmp_buf));
+			App_Printf("串口接收数据长度:%d\r\n", n);
+			device_write(puart1, tmp_buf, n);
+			App_Printf("串口发送数据长度:%d\r\n", n);
 		}
 
 	}

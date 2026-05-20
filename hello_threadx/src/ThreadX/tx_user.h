@@ -107,7 +107,10 @@
 
 
 /* 使能事件Trace，会稍微增加点代码 */
-//#define TX_ENABLE_EVENT_TRACE
+#define TX_ENABLE_EVENT_TRACE
+#define TX_TRACE_TIME_SOURCE                    *((ULONG *) 0xF8F00200)
+#define TX_TRACE_TIME_MASK                      0xFFFFFFFFUL
+
 
 
 /* 使能BLOCK_POOL信息获取 */
