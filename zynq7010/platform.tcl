@@ -46,3 +46,7 @@ bsp reload
 platform active {zynq7010}
 bsp reload
 platform generate
+platform clean
+platform generate
+platform clean
+platform generate
