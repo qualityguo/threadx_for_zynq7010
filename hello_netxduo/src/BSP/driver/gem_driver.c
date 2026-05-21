@@ -22,6 +22,12 @@
 #include "xil_io.h"
 #include "xil_cache.h"
 
+static inline u32 XEMACPS_BD_TO_INDEX(XEmacPs_BdRing *RingPtr,
+                                       XEmacPs_Bd *BdPtr)
+{
+    return ((u32)BdPtr - RingPtr->BaseBdAddr) / RingPtr->Separation;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Section 1: Includes and priv struct                                */
 /* ------------------------------------------------------------------ */
