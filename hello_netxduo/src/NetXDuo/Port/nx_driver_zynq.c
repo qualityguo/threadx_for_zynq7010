@@ -1,24 +1,24 @@
 /*
  * nx_driver_zynq.c - NetX Duo Ethernet driver for Xilinx Zynq-7000 GEM
  *
- * Adapted from Express Logic reference driver for Zynq-7000.
- * Uses device_core PHY driver (rtl8211e_driver) via device_find/device_ioctl
- * instead of direct PHY register access.
+ * All hardware operations are performed through the driver layer
+ * (gem_driver) via device_find("gem0") + device_ioctl().
+ * No Xilinx APIs are used directly in this file.
  *
  * Driver structure:
  *   nx_driver_zynq()           - entry point, command dispatch
  *   _nx_driver_*()             - generic NetX framework wrappers
- *   _nx_driver_hardware_*()    - Zynq GEM specific implementations
+ *   _nx_driver_hardware_*()    - hardware implementations via device_ioctl
  */
 
 #define NX_DRIVER_SOURCE
 
 #include "nx_driver_zynq.h"
 #include "device_core.h"
-#include "ioctl_cmd.h"
-#include "xemacps_bdring.h"
-#include "xscugic.h"
-#include "xil_printf.h"
+
+/* ARM Cortex-A9 memory barriers */
+#define dmb() __asm__ __volatile__ ("dmb" ::: "memory")
+#define dsb() __asm__ __volatile__ ("dsb" ::: "memory")
 
 /* ------------------------------------------------------------------ */
 /*  Driver information instance                                        */
@@ -29,11 +29,17 @@ static NX_DRIVER_INFORMATION nx_driver_information;
 /* MAC address */
 static UCHAR _nx_driver_hardware_address[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x56};
 
-/* Externals from BSP */
-extern XEmacPs  g_emac_ps;
-extern XScuGic  xInterruptController;
+/* ------------------------------------------------------------------ */
+/*  Device access helper                                               */
+/* ------------------------------------------------------------------ */
 
-#define EMACPS_IRPT_INTR   XPS_GEM0_INT_ID
+static struct device *get_eth_dev(void)
+{
+    static struct device *dev;
+    if (!dev)
+        dev = device_find("gem0");
+    return dev;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Forward declarations                                               */
@@ -65,10 +71,7 @@ static int  _nx_driver_hardware_packet_received(VOID);
 /* ISR callbacks */
 static VOID nx_driver_zynq_ethernet_rx_isr(void *handle);
 static VOID nx_driver_zynq_ethernet_tx_isr(void *handle);
-static VOID nx_driver_zynq_ethernet_error_isr(void *handle, UCHAR direction, ULONG error_code);
-
-/* MDIO divisor - must be set before PHY access */
-extern void XEmacPs_SetMdioDivisor(XEmacPs *InstancePtr, XEmacPs_MdcDiv Divisor);
+static VOID nx_driver_zynq_ethernet_error_isr(void *handle, uint8_t direction, uint32_t error_code);
 
 /* ================================================================== */
 /*  Driver Entry                                                       */
@@ -343,73 +346,85 @@ static VOID _nx_driver_transfer_to_netx(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 }
 
 /* ================================================================== */
-/*  Hardware-Specific Functions                                        */
+/*  Hardware-Specific Functions (via device_ioctl)                     */
 /* ================================================================== */
 
 static UINT _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
 {
+    struct device *eth_dev = get_eth_dev();
     UINT        i;
-    XEmacPs_Bd  BdTemplate;
-    XEmacPs_Bd *RxDesc_ptr;
-    XEmacPs_Bd *TxDesc_ptr;
     int         ret;
-    NX_PACKET  *packet_ptr;
-    UINT        rx_offset;
 
-    /* Setup indices */
     nx_driver_information.nx_driver_information_receive_current_index  = 0;
     nx_driver_information.nx_driver_information_transmit_current_index = 0;
     nx_driver_information.nx_driver_information_transmit_release_index = 0;
+
+    if (!eth_dev)
+        return NX_DRIVER_ERROR;
 
     if (nx_driver_information.nx_driver_information_packet_pool_ptr == NULL)
         return NX_DRIVER_ERROR;
 
     /* Configure MAC address */
-    ret = XEmacPs_SetMacAddress(&g_emac_ps, _nx_driver_hardware_address, 1);
-    if (ret != XST_SUCCESS) {
-        xil_printf("nx_driver: SetMacAddress failed\r\n");
-        return NX_DRIVER_ERROR;
+    {
+        gem_mac_addr_t mac_arg = { .addr = _nx_driver_hardware_address };
+        ret = device_ioctl(eth_dev, GEM_IOCTL_SET_MAC_ADDRESS, &mac_arg);
+        if (ret != 0)
+            return NX_DRIVER_ERROR;
     }
 
     /* Register ISR callbacks */
-    XEmacPs_SetHandler(&g_emac_ps, XEMACPS_HANDLER_DMASEND,
-                       (void *)nx_driver_zynq_ethernet_tx_isr, &g_emac_ps);
-    XEmacPs_SetHandler(&g_emac_ps, XEMACPS_HANDLER_DMARECV,
-                       (void *)nx_driver_zynq_ethernet_rx_isr, &g_emac_ps);
-    XEmacPs_SetHandler(&g_emac_ps, XEMACPS_HANDLER_ERROR,
-                       (void *)nx_driver_zynq_ethernet_error_isr, &g_emac_ps);
+    {
+        gem_callbacks_t cb_arg = {
+            .tx_cb  = (void (*)(void *))nx_driver_zynq_ethernet_tx_isr,
+            .rx_cb  = (void (*)(void *))nx_driver_zynq_ethernet_rx_isr,
+            .err_cb = (void (*)(void *, uint8_t, uint32_t))nx_driver_zynq_ethernet_error_isr,
+            .cb_arg = NULL,
+        };
+        device_ioctl(eth_dev, GEM_IOCTL_REGISTER_CALLBACKS, &cb_arg);
+    }
 
     /* Create RX BD ring */
-    XEmacPs_BdClear(&BdTemplate);
-    RxDesc_ptr = (XEmacPs_Bd *)RX_BD_LIST_START_ADDRESS;
-
-    ret = XEmacPs_BdRingCreate(&XEmacPs_GetRxRing(&g_emac_ps),
-                                (u32)RxDesc_ptr, (u32)RxDesc_ptr,
-                                XEMACPS_BD_ALIGNMENT, NX_DRIVER_RX_DESCRIPTORS);
-    if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
-
-    ret = XEmacPs_BdRingClone(&XEmacPs_GetRxRing(&g_emac_ps), &BdTemplate, XEMACPS_RECV);
-    if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
+    {
+        gem_bd_ring_create_t rx_ring = {
+            .base_addr = RX_BD_LIST_START_ADDRESS,
+            .count     = NX_DRIVER_RX_DESCRIPTORS,
+        };
+        ret = device_ioctl(eth_dev, GEM_IOCTL_RX_BD_RING_CREATE, &rx_ring);
+        if (ret != 0)
+            return NX_DRIVER_ERROR;
+    }
 
     /* Allocate RX packets and assign buffer addresses */
     for (i = 0; i < NX_DRIVER_RX_DESCRIPTORS; i++) {
-        XEmacPs_Bd *bd_ptr;
+        gem_bd_op_t alloc_arg = { .num = 1 };
+        NX_PACKET   *packet_ptr;
+        nx_bd_t     *bd;
+        gem_bd_op_t  hw_arg;
+        gem_cache_op_t cache_arg;
 
-        ret = XEmacPs_BdRingAlloc(&XEmacPs_GetRxRing(&g_emac_ps), 1, &bd_ptr);
-        if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
+        device_ioctl(eth_dev, GEM_IOCTL_BD_RING_ALLOC_RX, &alloc_arg);
+        if (alloc_arg.status != 0)
+            return NX_DRIVER_ERROR;
 
         ret = nx_packet_allocate(
             nx_driver_information.nx_driver_information_packet_pool_ptr,
             &packet_ptr, NX_RECEIVE_PACKET, NX_NO_WAIT);
-        if (ret != NX_SUCCESS) return NX_DRIVER_ERROR;
+        if (ret != NX_SUCCESS)
+            return NX_DRIVER_ERROR;
 
-        XEmacPs_BdSetAddressRx(bd_ptr, packet_ptr->nx_packet_prepend_ptr);
+        bd = (nx_bd_t *)alloc_arg.bd_ptr;
+        NX_BD_SET_ADDR(bd, packet_ptr->nx_packet_prepend_ptr);
 
-        ret = XEmacPs_BdRingToHw(&XEmacPs_GetRxRing(&g_emac_ps), 1, bd_ptr);
-        if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
+        hw_arg.num = 1;
+        hw_arg.bd_ptr = alloc_arg.bd_ptr;
+        device_ioctl(eth_dev, GEM_IOCTL_BD_RING_TO_HW_RX, &hw_arg);
+        if (hw_arg.status != 0)
+            return NX_DRIVER_ERROR;
 
-        Xil_DCacheInvalidateRange((u32)packet_ptr->nx_packet_prepend_ptr,
-                                  NX_DRIVER_ETHERNET_MTU);
+        cache_arg.addr = packet_ptr->nx_packet_prepend_ptr;
+        cache_arg.len  = NX_DRIVER_ETHERNET_MTU;
+        device_ioctl(eth_dev, GEM_IOCTL_CACHE_INVALIDATE, &cache_arg);
 
         nx_driver_information.nx_driver_information_receive_packets[i] = packet_ptr;
     }
@@ -418,61 +433,38 @@ static UINT _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
     for (i = 0; i < NX_DRIVER_TX_DESCRIPTORS; i++)
         nx_driver_information.nx_driver_information_transmit_packets[i] = NX_NULL;
 
-    /* Configure RX buffer offset (2 bytes for IP header alignment) */
-    rx_offset = XEmacPs_ReadReg(g_emac_ps.Config.BaseAddress, XEMACPS_NWCFG_OFFSET);
-    rx_offset &= ~(3 << 14);
-    rx_offset |= (2 << 14);
-    XEmacPs_WriteReg(g_emac_ps.Config.BaseAddress, XEMACPS_NWCFG_OFFSET, rx_offset);
+    /* Set RX buffer offset (2 bytes for IP header alignment) */
+    {
+        uint32_t v = 2;
+        device_ioctl(eth_dev, GEM_IOCTL_SET_RX_OFFSET, &v);
+    }
 
     /* Create TX BD ring */
-    XEmacPs_BdClear(&BdTemplate);
-    XEmacPs_BdSetStatus(&BdTemplate, XEMACPS_TXBUF_USED_MASK);
-    TxDesc_ptr = (XEmacPs_Bd *)TX_BD_LIST_START_ADDRESS;
-
-    ret = XEmacPs_BdRingCreate(&XEmacPs_GetTxRing(&g_emac_ps),
-                                (u32)TxDesc_ptr, (u32)TxDesc_ptr,
-                                XEMACPS_BD_ALIGNMENT, NX_DRIVER_TX_DESCRIPTORS);
-    if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
-
-    ret = XEmacPs_BdRingClone(&XEmacPs_GetTxRing(&g_emac_ps), &BdTemplate, XEMACPS_SEND);
-    if (ret != XST_SUCCESS) return NX_DRIVER_ERROR;
-
-    /* Set MDIO divisor (already configured by PHY driver, but ensure it's set) */
-    XEmacPs_SetMdioDivisor(&g_emac_ps, MDC_DIV_224);
-
-    /* PHY auto-negotiation is handled by rtl8211e_driver_init() in board_init.
-     * Read the negotiated speed from the PHY driver. */
     {
-        struct device *phy_dev = device_find("rtl8211e0");
-        if (phy_dev) {
-            uint32_t speed = 1000;
-            device_ioctl(phy_dev, PHY_IOCTL_GET_SPEED, &speed);
-            XEmacPs_SetOperatingSpeed(&g_emac_ps, speed);
-            xil_printf("nx_driver: MAC speed set to %dMbps\r\n", speed);
-        } else {
-            xil_printf("nx_driver: WARNING - PHY driver not found, using 1000Mbps\r\n");
-            XEmacPs_SetOperatingSpeed(&g_emac_ps, 1000);
-        }
+        gem_bd_ring_create_t tx_ring = {
+            .base_addr = TX_BD_LIST_START_ADDRESS,
+            .count     = NX_DRIVER_TX_DESCRIPTORS,
+        };
+        ret = device_ioctl(eth_dev, GEM_IOCTL_TX_BD_RING_CREATE, &tx_ring);
+        if (ret != 0)
+            return NX_DRIVER_ERROR;
     }
 
-    /* Register GIC interrupt handler (but don't enable yet - done in _enable) */
-    ret = XScuGic_Connect(&xInterruptController, EMACPS_IRPT_INTR,
-                           (Xil_InterruptHandler)XEmacPs_IntrHandler,
-                           (void *)&g_emac_ps);
-    if (ret != XST_SUCCESS) {
-        xil_printf("nx_driver: GIC connect failed\r\n");
-        return NX_DRIVER_ERROR;
-    }
+    /* Register GIC interrupt handler (but don't enable yet) */
+    device_ioctl(eth_dev, GEM_IOCTL_ENABLE_INTERRUPTS, NULL);
 
     /* Enable TX/RX checksum offload and promiscuous mode */
-    XEmacPs_SetOptions(&g_emac_ps,
-                       XEMACPS_RX_CHKSUM_ENABLE_OPTION |
-                       XEMACPS_TX_CHKSUM_ENABLE_OPTION |
-                       XEMACPS_MULTICAST_OPTION |
-                       XEMACPS_PROMISC_OPTION);
+    {
+        uint32_t opts = NX_GEM_OPT_RX_CHKSUM | NX_GEM_OPT_TX_CHKSUM |
+                        NX_GEM_OPT_MULTICAST  | NX_GEM_OPT_PROMISC;
+        device_ioctl(eth_dev, GEM_IOCTL_SET_OPTIONS, &opts);
+    }
 
     /* Configure DMA */
-    XEmacPs_WriteReg(g_emac_ps.Config.BaseAddress, XEMACPS_DMACR_OFFSET, 0x00190F10);
+    {
+        uint32_t dma = 0x00190F10;
+        device_ioctl(eth_dev, GEM_IOCTL_CONFIGURE_DMA, &dma);
+    }
 
     driver_req_ptr->nx_ip_driver_status = NX_SUCCESS;
     return NX_SUCCESS;
@@ -481,24 +473,24 @@ static UINT _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
 static UINT _nx_driver_hardware_enable(NX_IP_DRIVER *driver_req_ptr)
 {
     (void)driver_req_ptr;
+    struct device *eth_dev = get_eth_dev();
 
-    XScuGic_Enable(&xInterruptController, XPS_GEM0_INT_ID);
-    XEmacPs_Start(&g_emac_ps);
-
-    xil_printf("nx_driver: hardware enabled\r\n");
+    device_ioctl(eth_dev, GEM_IOCTL_ENABLE, NULL);
     return NX_SUCCESS;
 }
 
 static UINT _nx_driver_hardware_disable(NX_IP_DRIVER *driver_req_ptr)
 {
     (void)driver_req_ptr;
+    struct device *eth_dev = get_eth_dev();
+
+    device_ioctl(eth_dev, GEM_IOCTL_DISABLE, NULL);
     return NX_SUCCESS;
 }
 
 static UINT _nx_driver_hardware_packet_send(NX_PACKET *packet_ptr)
 {
-    XEmacPs    *instance_ptr = &g_emac_ps;
-    XEmacPs_Bd *bd_ptr;
+    struct device *eth_dev = get_eth_dev();
     NX_PACKET  *tmp_ptr;
     ULONG       cur_idx;
     int         ret;
@@ -506,48 +498,59 @@ static UINT _nx_driver_hardware_packet_send(NX_PACKET *packet_ptr)
 
     TX_DISABLE
 
-    ret = XEmacPs_BdRingAlloc(&XEmacPs_GetTxRing(instance_ptr), 1, &bd_ptr);
-    if (ret != XST_SUCCESS) {
-        TX_RESTORE
-        return NX_DRIVER_ERROR;
-    }
-
-    for (tmp_ptr = packet_ptr; tmp_ptr != NX_NULL; tmp_ptr = tmp_ptr->nx_packet_next) {
-        cur_idx = nx_driver_information.nx_driver_information_transmit_current_index;
-
-        if (nx_driver_information.nx_driver_information_transmit_packets[cur_idx] == NX_NULL) {
-            nx_driver_information.nx_driver_information_transmit_packets[cur_idx] = tmp_ptr;
-        } else {
-            xil_printf("nx_driver: TX descriptor leak at index %lu\r\n", cur_idx);
+    {
+        gem_bd_op_t alloc_arg = { .num = 1 };
+        device_ioctl(eth_dev, GEM_IOCTL_BD_RING_ALLOC_TX, &alloc_arg);
+        if (alloc_arg.status != 0) {
+            TX_RESTORE
+            return NX_DRIVER_ERROR;
         }
 
-        nx_driver_information.nx_driver_information_transmit_current_index =
-            (cur_idx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
+        nx_bd_t *bd = (nx_bd_t *)alloc_arg.bd_ptr;
 
-        Xil_DCacheFlushRange((u32)tmp_ptr->nx_packet_prepend_ptr,
-                             tmp_ptr->nx_packet_length);
+        for (tmp_ptr = packet_ptr; tmp_ptr != NX_NULL; tmp_ptr = tmp_ptr->nx_packet_next) {
+            cur_idx = nx_driver_information.nx_driver_information_transmit_current_index;
 
-        XEmacPs_BdSetAddressTx(bd_ptr, tmp_ptr->nx_packet_prepend_ptr);
-        XEmacPs_BdSetLength(bd_ptr, tmp_ptr->nx_packet_length);
-        XEmacPs_BdClearLast(bd_ptr);
+            if (nx_driver_information.nx_driver_information_transmit_packets[cur_idx] == NX_NULL) {
+                nx_driver_information.nx_driver_information_transmit_packets[cur_idx] = tmp_ptr;
+            }
+
+            nx_driver_information.nx_driver_information_transmit_current_index =
+                (cur_idx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
+
+            {
+                gem_cache_op_t cache_arg = {
+                    .addr = tmp_ptr->nx_packet_prepend_ptr,
+                    .len  = tmp_ptr->nx_packet_length,
+                };
+                device_ioctl(eth_dev, GEM_IOCTL_CACHE_FLUSH, &cache_arg);
+            }
+
+            NX_BD_SET_ADDR(bd, tmp_ptr->nx_packet_prepend_ptr);
+            NX_BD_SET_LENGTH(bd, tmp_ptr->nx_packet_length);
+            NX_BD_CLEAR_LAST(bd);
+            dmb();
+            dsb();
+        }
+
+        NX_BD_SET_LAST(bd);
+        dmb();
+        dsb();
+
+        {
+            gem_bd_op_t hw_arg = { .num = 1, .bd_ptr = (uint32_t *)bd };
+            device_ioctl(eth_dev, GEM_IOCTL_BD_RING_TO_HW_TX, &hw_arg);
+            if (hw_arg.status != 0) {
+                TX_RESTORE
+                return NX_DRIVER_ERROR;
+            }
+        }
+
+        NX_BD_CLEAR_TX_USED(bd);
+        device_ioctl(eth_dev, GEM_IOCTL_START_TX, NULL);
         dmb();
         dsb();
     }
-
-    XEmacPs_BdSetLast(bd_ptr);
-    dmb();
-    dsb();
-
-    ret = XEmacPs_BdRingToHw(&XEmacPs_GetTxRing(instance_ptr), 1, bd_ptr);
-    if (ret != XST_SUCCESS) {
-        TX_RESTORE
-        return NX_DRIVER_ERROR;
-    }
-
-    XEmacPs_BdClearTxUsed(bd_ptr);
-    XEmacPs_Transmit(instance_ptr);
-    dmb();
-    dsb();
 
     TX_RESTORE
     return NX_SUCCESS;
@@ -573,57 +576,70 @@ static UINT _nx_driver_hardware_get_status(NX_IP_DRIVER *driver_req_ptr)
 
 static int _nx_driver_hardware_packet_transmitted(VOID)
 {
-    XEmacPs_Bd *bd_ptr;
-    XEmacPs_Bd *curr_bd;
-    int         num_bds;
-    XEmacPs    *instance_ptr = &g_emac_ps;
-    ULONG      *value;
-    int         i;
-    UINT        ret;
-    NX_PACKET  *packet_ptr;
-    ULONG       idx = nx_driver_information.nx_driver_information_transmit_release_index;
+    struct device *eth_dev = get_eth_dev();
+    uint32_t   num_bds;
+    uint32_t  *curr_bd_mem;
+    nx_bd_t   *curr_bd;
+    int        i;
+    ULONG      idx = nx_driver_information.nx_driver_information_transmit_release_index;
     TX_INTERRUPT_SAVE_AREA
 
     TX_DISABLE
 
-    num_bds = XEmacPs_BdRingFromHwTx(&XEmacPs_GetTxRing(instance_ptr),
-                                       NX_DRIVER_TX_DESCRIPTORS, &bd_ptr);
-    if (num_bds == 0) {
-        TX_RESTORE
-        return 0;
-    }
-
-    curr_bd = bd_ptr;
-    for (i = 0; i < num_bds; i++) {
-        value = (ULONG *)curr_bd;
-
-        packet_ptr = nx_driver_information.nx_driver_information_transmit_packets[idx];
-        nx_driver_information.nx_driver_information_transmit_packets[idx] = NX_NULL;
-
-        idx = (idx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
-        nx_driver_information.nx_driver_information_transmit_release_index = idx;
-
-        if (packet_ptr != NX_NULL) {
-            NX_DRIVER_ETHERNET_HEADER_REMOVE(packet_ptr);
-            nx_packet_transmit_release(packet_ptr);
+    {
+        gem_bd_from_hw_t from_arg = { .limit = NX_DRIVER_TX_DESCRIPTORS };
+        device_ioctl(eth_dev, GEM_IOCTL_BD_RING_FROM_HW_TX, &from_arg);
+        num_bds = from_arg.count;
+        if (num_bds == 0) {
+            TX_RESTORE
+            return 0;
         }
 
-        /* Reset BD */
-        *value = 0;
-        value++;
-        if (XEMACPS_BD_TO_INDEX(&XEmacPs_GetTxRing(instance_ptr), curr_bd) ==
-            (NX_DRIVER_TX_DESCRIPTORS - 1))
-            *value = 0xC0000000;
-        else
-            *value = 0x80000000;
+        curr_bd_mem = from_arg.bd_ptr;
+        curr_bd = (nx_bd_t *)curr_bd_mem;
 
-        curr_bd = XEmacPs_BdRingNext(&XEmacPs_GetTxRing(instance_ptr), curr_bd);
-        dmb();
-        dsb();
+        for (i = 0; i < (int)num_bds; i++) {
+            NX_PACKET *packet_ptr;
+            uint32_t  *value;
+
+            packet_ptr = nx_driver_information.nx_driver_information_transmit_packets[idx];
+            nx_driver_information.nx_driver_information_transmit_packets[idx] = NX_NULL;
+
+            idx = (idx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
+            nx_driver_information.nx_driver_information_transmit_release_index = idx;
+
+            if (packet_ptr != NX_NULL) {
+                NX_DRIVER_ETHERNET_HEADER_REMOVE(packet_ptr);
+                nx_packet_transmit_release(packet_ptr);
+            }
+
+            /* Reset BD */
+            value = (uint32_t *)curr_bd;
+            *value = 0;
+            value++;
+            {
+                gem_bd_nav_t nav_arg = { .bd_ptr = (uint32_t *)curr_bd };
+                device_ioctl(eth_dev, GEM_IOCTL_BD_TO_INDEX_TX, &nav_arg);
+                if (nav_arg.index == (NX_DRIVER_TX_DESCRIPTORS - 1))
+                    *value = 0xC0000000;
+                else
+                    *value = 0x80000000;
+            }
+
+            {
+                gem_bd_nav_t nav_arg = { .bd_ptr = (uint32_t *)curr_bd };
+                device_ioctl(eth_dev, GEM_IOCTL_BD_RING_NEXT_TX, &nav_arg);
+                curr_bd = (nx_bd_t *)nav_arg.next_ptr;
+            }
+            dmb();
+            dsb();
+        }
+
+        {
+            gem_bd_op_t free_arg = { .num = num_bds, .bd_ptr = curr_bd_mem };
+            device_ioctl(eth_dev, GEM_IOCTL_BD_RING_FREE_TX, &free_arg);
+        }
     }
-
-    ret = XEmacPs_BdRingFree(&XEmacPs_GetTxRing(instance_ptr), num_bds, bd_ptr);
-    Xil_AssertNonvoid(ret == XST_SUCCESS);
 
     TX_RESTORE
     return 0;
@@ -631,21 +647,23 @@ static int _nx_driver_hardware_packet_transmitted(VOID)
 
 static int _nx_driver_hardware_packet_received(VOID)
 {
-    XEmacPs_Bd *bd_ptr;
-    XEmacPs_Bd *new_bd;
-    int         num_rx;
+    struct device *eth_dev = get_eth_dev();
     NX_PACKET  *packet_ptr;
     int         length;
-    XEmacPs    *instance_ptr = &g_emac_ps;
     ULONG       first_idx = nx_driver_information.nx_driver_information_receive_current_index;
-    int         status;
 
     while (1) {
-        num_rx = XEmacPs_BdRingFromHwRx(&XEmacPs_GetRxRing(instance_ptr), 1, &bd_ptr);
+        gem_bd_from_hw_t from_arg = { .limit = 1 };
+        uint32_t num_rx;
+        nx_bd_t *bd;
+
+        device_ioctl(eth_dev, GEM_IOCTL_BD_RING_FROM_HW_RX, &from_arg);
+        num_rx = from_arg.count;
         if (num_rx == 0)
             return 0;
 
-        length = XEmacPs_BdGetLength(bd_ptr);
+        bd = (nx_bd_t *)from_arg.bd_ptr;
+        length = NX_BD_GET_LENGTH(bd);
 
         packet_ptr = nx_driver_information.nx_driver_information_receive_packets[first_idx];
         packet_ptr->nx_packet_length      = length;
@@ -658,43 +676,60 @@ static int _nx_driver_hardware_packet_received(VOID)
         _nx_driver_transfer_to_netx(
             nx_driver_information.nx_driver_information_ip_ptr, packet_ptr);
 
-        XEmacPs_BdRingFree(&XEmacPs_GetRxRing(instance_ptr), 1, bd_ptr);
+        {
+            gem_bd_op_t free_arg = { .num = 1, .bd_ptr = (uint32_t *)bd };
+            device_ioctl(eth_dev, GEM_IOCTL_BD_RING_FREE_RX, &free_arg);
+        }
 
         /* Allocate a new packet for this BD slot */
-        status = nx_packet_allocate(
-            nx_driver_information.nx_driver_information_packet_pool_ptr,
-            &packet_ptr, NX_RECEIVE_PACKET, NX_NO_WAIT);
+        {
+            int status = nx_packet_allocate(
+                nx_driver_information.nx_driver_information_packet_pool_ptr,
+                &packet_ptr, NX_RECEIVE_PACKET, NX_NO_WAIT);
 
-        if (status == NX_SUCCESS) {
-            ULONG *temp;
-            int    bd_index;
+            if (status == NX_SUCCESS) {
+                gem_bd_op_t alloc_arg2 = { .num = 1 };
+                gem_bd_nav_t nav_arg;
+                nx_bd_t *new_bd;
+                int bd_index;
+                uint32_t *temp;
 
-            status = XEmacPs_BdRingAlloc(&XEmacPs_GetRxRing(instance_ptr), 1, &new_bd);
-            Xil_AssertNonvoid(status == XST_SUCCESS);
+                device_ioctl(eth_dev, GEM_IOCTL_BD_RING_ALLOC_RX, &alloc_arg2);
+                if (alloc_arg2.status != 0) {
+                    /* Should not happen */
+                }
 
-            bd_index = XEMACPS_BD_TO_INDEX(&XEmacPs_GetRxRing(instance_ptr), new_bd);
-            temp = (ULONG *)new_bd;
-            if (bd_index == (NX_DRIVER_RX_DESCRIPTORS - 1))
-                *temp = 2;
-            else
+                new_bd = (nx_bd_t *)alloc_arg2.bd_ptr;
+
+                nav_arg.bd_ptr = (uint32_t *)new_bd;
+                device_ioctl(eth_dev, GEM_IOCTL_BD_TO_INDEX_RX, &nav_arg);
+                bd_index = (int)nav_arg.index;
+
+                temp = (uint32_t *)new_bd;
+                if (bd_index == (NX_DRIVER_RX_DESCRIPTORS - 1))
+                    *temp = 2;
+                else
+                    *temp = 0;
+                temp++;
                 *temp = 0;
-            temp++;
-            *temp = 0;
 
-            XEmacPs_BdSetAddressRx(new_bd, packet_ptr->nx_packet_prepend_ptr);
+                NX_BD_SET_ADDR(new_bd, packet_ptr->nx_packet_prepend_ptr);
 
-            status = XEmacPs_BdRingToHw(&XEmacPs_GetRxRing(instance_ptr), 1, new_bd);
-            if (status != XST_SUCCESS)
-                xil_printf("nx_driver: RX BD to HW failed: %d\r\n", status);
+                {
+                    gem_bd_op_t hw_arg = { .num = 1, .bd_ptr = (uint32_t *)new_bd };
+                    device_ioctl(eth_dev, GEM_IOCTL_BD_RING_TO_HW_RX, &hw_arg);
+                }
 
-            nx_driver_information.nx_driver_information_receive_packets[first_idx] = packet_ptr;
+                nx_driver_information.nx_driver_information_receive_packets[first_idx] = packet_ptr;
 
-            Xil_AssertNonvoid(status == XST_SUCCESS);
-
-            Xil_DCacheInvalidateRange((u32)packet_ptr->nx_packet_prepend_ptr,
-                                      NX_DRIVER_ETHERNET_MTU);
-        } else {
-            xil_printf("nx_driver: RX alloc fail: 0x%x\r\n", status);
+                {
+                    gem_cache_op_t cache_arg = {
+                        .addr = packet_ptr->nx_packet_prepend_ptr,
+                        .len  = NX_DRIVER_ETHERNET_MTU,
+                    };
+                    device_ioctl(eth_dev, GEM_IOCTL_CACHE_INVALIDATE, &cache_arg);
+                }
+            }
         }
 
         first_idx = (first_idx + 1) & (NX_DRIVER_RX_DESCRIPTORS - 1);
@@ -734,22 +769,19 @@ static VOID nx_driver_zynq_ethernet_tx_isr(void *handle)
         _nx_ip_driver_deferred_processing(nx_driver_information.nx_driver_information_ip_ptr);
 }
 
-static VOID nx_driver_zynq_ethernet_error_isr(void *handle, UCHAR direction, ULONG error_code)
+static VOID nx_driver_zynq_ethernet_error_isr(void *handle, uint8_t direction, uint32_t error_code)
 {
-    XEmacPs *instance_ptr = &g_emac_ps;
-    UINT     txsr;
+    struct device *eth_dev = get_eth_dev();
+    uint32_t txsr;
 
     (void)handle;
 
     nx_driver_information.nx_driver_information_deferred_events |= NX_DRIVER_DEFERRED_DRIVER_ERROR;
 
-    txsr = XEmacPs_ReadReg(instance_ptr->Config.BaseAddress, XEMACPS_TXSR_OFFSET);
-
-    xil_printf("nx_driver: ERROR dir=%d code=0x%lx txsr=0x%x\r\n",
-               direction, error_code, txsr);
+    device_ioctl(eth_dev, GEM_IOCTL_READ_TX_STATUS, &txsr);
 
     /* Some error codes are actually TX completion notifications */
-    if (direction == XEMACPS_SEND && (error_code == 0 || error_code == 8)) {
+    if (direction == 1 && (error_code == 0 || error_code == 8)) {
         nx_driver_zynq_ethernet_tx_isr(handle);
     }
 }

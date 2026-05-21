@@ -3,6 +3,8 @@
  *
  * This header defines the driver information structure and entry function
  * for the Zynq GEM (Gigabit Ethernet MAC) NetX Duo driver.
+ * All hardware operations are performed through the driver layer via
+ * device_ioctl — no Xilinx API headers are included here.
  */
 
 #ifndef NX_DRIVER_ZYNQ_H
@@ -20,12 +22,7 @@ extern "C" {
 #include "nx_api.h"
 #endif
 
-/* Xilinx Standalone BSP headers */
-#include "xemacps.h"
-#include "xparameters.h"
-#include "xparameters_ps.h"
-#include "xil_types.h"
-#include "xil_cache.h"
+#include "ioctl_cmd.h"
 
 /* Compile-time constants for all NetX Ethernet drivers */
 #define NX_DRIVER_ETHERNET_IP                   0x0800
@@ -60,8 +57,38 @@ extern "C" {
 #define RX_BD_LIST_START_ADDRESS    0x0FF00000
 #define TX_BD_LIST_START_ADDRESS    0x0FF10000
 
-#define XEMACPS_BD_TO_INDEX(ringptr, bdptr) \
-    (((UINT)(bdptr) - (UINT)(ringptr)->BaseBdAddr) / (ringptr)->Separation)
+/* GEM option bits (matching XEMACPS_*_OPTION values) */
+#define NX_GEM_OPT_RX_CHKSUM        0x00001000U
+#define NX_GEM_OPT_TX_CHKSUM        0x00002000U
+#define NX_GEM_OPT_MULTICAST        0x00000800U
+#define NX_GEM_OPT_PROMISC          0x00000001U
+
+/* BD type — binary compatible with XEmacPs_Bd on Zynq-7000 (2 x uint32_t) */
+typedef uint32_t nx_bd_t[2];
+
+/* BD status bit masks */
+#define NX_TXBUF_USED       (1U << 31)
+#define NX_TXBUF_WRAP       (1U << 30)
+#define NX_TXBUF_LAST       (1U << 15)
+#define NX_TXBUF_LEN_MASK   0x00003FFFU
+#define NX_RXBUF_NEW        (1U << 0)
+#define NX_RXBUF_WRAP       (1U << 1)
+#define NX_RXBUF_EOF        (1U << 15)
+#define NX_RXBUF_SOF        (1U << 14)
+#define NX_RXBUF_LEN_MASK   0x00001FFFU
+
+/* BD field access macros — bd is nx_bd_t * (pointer to uint32_t[2]) */
+#define NX_BD_CLEAR(bd)             do { (*(bd))[0] = 0; (*(bd))[1] = 0; } while(0)
+#define NX_BD_SET_ADDR(bd, a)       ((*(bd))[0] = (uint32_t)(a))
+#define NX_BD_GET_ADDR(bd)          ((*(bd))[0])
+#define NX_BD_SET_STATUS(bd, v)     ((*(bd))[1] = (v))
+#define NX_BD_GET_STATUS(bd)        ((*(bd))[1])
+#define NX_BD_SET_LENGTH(bd, l)     ((*(bd))[1] = ((*(bd))[1] & ~NX_TXBUF_LEN_MASK) | ((l) & NX_TXBUF_LEN_MASK))
+#define NX_BD_GET_LENGTH(bd)        ((*(bd))[1] & NX_RXBUF_LEN_MASK)
+#define NX_BD_SET_LAST(bd)          ((*(bd))[1] |= NX_TXBUF_LAST)
+#define NX_BD_CLEAR_LAST(bd)        ((*(bd))[1] &= ~NX_TXBUF_LAST)
+#define NX_BD_CLEAR_TX_USED(bd)     ((*(bd))[1] &= ~NX_TXBUF_USED)
+#define NX_BD_SET_TX_USED(bd)       ((*(bd))[1] |= NX_TXBUF_USED)
 
 /* Driver information structure - only valid when NX_DRIVER_SOURCE is defined */
 #ifdef NX_DRIVER_SOURCE

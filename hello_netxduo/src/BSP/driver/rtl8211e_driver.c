@@ -4,34 +4,30 @@
  * Architecture:
  *   board_init.c:  XEmacPs g_emac_ps  (LookupConfig + CfgInitialize)
  *                         |
- *   rtl8211e_driver.c:   priv holds XEmacPs* + phy_addr + speed/duplex
+ *   gem_driver.c:       "gem0" — GEM MAC + DMA + MDIO bus controller
  *                         |
- *   nx_driver_zynq.c:    device_find("rtl8211e0") -> device_ioctl()
+ *   rtl8211e_driver.c:  "rtl8211e0" — PHY-only, uses gem0 MDIO ioctl
+ *                         |
+ *   nx_driver_zynq.c:   device_find("gem0") -> GEM ioctl for TX/RX
  *
- * PHY is accessed via MDIO through XEmacPs MAC controller.
- * Pattern A (static state) - no ISR, polled via MDIO.
+ * This driver has zero Xilinx API dependencies. All PHY register access
+ * is performed through the GEM driver's MDIO ioctl interface.
  */
 
 #include "device_core.h"
 #include "ioctl_cmd.h"
-#include "xemacps.h"
-#include "xparameters_ps.h"
-#include "xparameters.h"
 #include "xil_printf.h"
-#include "xil_io.h"
 
 /* ------------------------------------------------------------------ */
 /*  Section 1: Includes and priv struct                                */
 /* ------------------------------------------------------------------ */
 
-extern XEmacPs  g_emac_ps;
-
 struct rtl8211e_priv {
-    XEmacPs   *emac;
-    uint32_t   phy_addr;
-    uint32_t   speed;      /* 10 / 100 / 1000 */
-    uint32_t   duplex;     /* 0=half, 1=full */
-    uint32_t   link_up;    /* 0=down, 1=up */
+    struct device *gem_dev;     /* gem0 device for MDIO access */
+    uint32_t       phy_addr;
+    uint32_t       speed;      /* 10 / 100 / 1000 */
+    uint32_t       duplex;     /* 0=half, 1=full */
+    uint32_t       link_up;    /* 0=down, 1=up */
 };
 
 /* IEEE standard register offsets */
@@ -63,34 +59,46 @@ struct rtl8211e_priv {
 #define ADVERTISE_ALL   (ADVERTISE_10HALF | ADVERTISE_10FULL | \
                          ADVERTISE_100HALF | ADVERTISE_100FULL)
 
-/* SLCR register definitions for GEM0 clock configuration */
-#define SLCR_LOCK_ADDR          (XPS_SYS_CTRL_BASEADDR + 0x4)
-#define SLCR_UNLOCK_ADDR        (XPS_SYS_CTRL_BASEADDR + 0x8)
-#define SLCR_GEM0_CLK_CTRL_ADDR (XPS_SYS_CTRL_BASEADDR + 0x140)
-#define SLCR_LOCK_KEY_VALUE     0x767B
-#define SLCR_UNLOCK_KEY_VALUE   0xDF0D
-#define EMACPS_SLCR_DIV_MASK    0xFC0FC0FF
-
 /* PHY detection */
 #define PHY_DETECT_REG          1
 #define PHY_DETECT_MASK         0x1808
 
 /* ------------------------------------------------------------------ */
-/*  Section 2: Helper functions (internal)                             */
+/*  Section 2: MDIO wrapper functions                                  */
+/* ------------------------------------------------------------------ */
+
+static int phy_mdio_read(struct rtl8211e_priv *p, uint32_t phy_addr,
+                         uint32_t reg, uint16_t *val)
+{
+    gem_mdio_xfer_t xfer = { .phy_addr = phy_addr, .reg_addr = reg, .value = 0 };
+    int ret = device_ioctl(p->gem_dev, GEM_IOCTL_MDIO_READ, &xfer);
+    *val = xfer.value;
+    return ret;
+}
+
+static int phy_mdio_write(struct rtl8211e_priv *p, uint32_t phy_addr,
+                          uint32_t reg, uint16_t val)
+{
+    gem_mdio_xfer_t xfer = { .phy_addr = phy_addr, .reg_addr = reg, .value = val };
+    return device_ioctl(p->gem_dev, GEM_IOCTL_MDIO_WRITE, &xfer);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Section 2 (cont): PHY helper functions                             */
 /* ------------------------------------------------------------------ */
 
 /* Scan MDIO addresses 31->1 to find a valid PHY */
-static uint32_t phy_detect_addr(XEmacPs *emac)
+static uint32_t phy_detect_addr(struct rtl8211e_priv *p)
 {
-    u16 phy_reg;
-    u32 phy_addr;
+    uint16_t phy_reg;
+    uint32_t addr;
 
-    for (phy_addr = 31; phy_addr > 0; phy_addr--) {
-        XEmacPs_PhyRead(emac, phy_addr, PHY_DETECT_REG, &phy_reg);
+    for (addr = 31; addr > 0; addr--) {
+        phy_mdio_read(p, addr, PHY_DETECT_REG, &phy_reg);
         if ((phy_reg != 0xFFFF) &&
             ((phy_reg & PHY_DETECT_MASK) == PHY_DETECT_MASK)) {
-            xil_printf("RTL8211E: PHY detected at address %d\r\n", phy_addr);
-            return phy_addr;
+            xil_printf("RTL8211E: PHY detected at address %d\r\n", addr);
+            return addr;
         }
     }
 
@@ -99,18 +107,17 @@ static uint32_t phy_detect_addr(XEmacPs *emac)
 }
 
 /* Software reset via control register */
-static int phy_reset(XEmacPs *emac, uint32_t phy_addr)
+static int phy_reset(struct rtl8211e_priv *p)
 {
-    u16 control;
+    uint16_t control;
     int timeout = 10000;
 
-    XEmacPs_PhyRead(emac, phy_addr, IEEE_CONTROL_REG, &control);
+    phy_mdio_read(p, p->phy_addr, IEEE_CONTROL_REG, &control);
     control |= CTRL_RESET_MASK;
-    XEmacPs_PhyWrite(emac, phy_addr, IEEE_CONTROL_REG, control);
+    phy_mdio_write(p, p->phy_addr, IEEE_CONTROL_REG, control);
 
-    /* Wait for reset to complete */
     do {
-        XEmacPs_PhyRead(emac, phy_addr, IEEE_CONTROL_REG, &control);
+        phy_mdio_read(p, p->phy_addr, IEEE_CONTROL_REG, &control);
         if (timeout-- <= 0) {
             xil_printf("RTL8211E: PHY reset timeout\r\n");
             return -1;
@@ -120,59 +127,34 @@ static int phy_reset(XEmacPs *emac, uint32_t phy_addr)
     return 0;
 }
 
-/* Configure SLCR GEM0 TX clock dividers for given link speed */
-static void slcr_set_gem0_clock(uint32_t speed)
-{
-    u32 slcr_val;
-
-    *(volatile u32 *)SLCR_UNLOCK_ADDR = SLCR_UNLOCK_KEY_VALUE;
-
-    slcr_val = *(volatile u32 *)SLCR_GEM0_CLK_CTRL_ADDR;
-    slcr_val &= EMACPS_SLCR_DIV_MASK;
-
-    if (speed == 1000) {
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_1000MBPS_DIV1 << 20);
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_1000MBPS_DIV0 << 8);
-    } else if (speed == 100) {
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_100MBPS_DIV1 << 20);
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_100MBPS_DIV0 << 8);
-    } else {
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_10MBPS_DIV1 << 20);
-        slcr_val |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_10MBPS_DIV0 << 8);
-    }
-
-    *(volatile u32 *)SLCR_GEM0_CLK_CTRL_ADDR = slcr_val;
-    *(volatile u32 *)SLCR_LOCK_ADDR = SLCR_LOCK_KEY_VALUE;
-}
-
 /* Run auto-negotiation using standard IEEE registers */
-static int phy_autoneg(XEmacPs *emac, uint32_t phy_addr)
+static int phy_autoneg(struct rtl8211e_priv *p)
 {
-    u16 control;
-    u16 status;
+    uint16_t control;
+    uint16_t status;
     int timeout;
 
     /* Advertise 1000BASE-T capabilities */
-    XEmacPs_PhyRead(emac, phy_addr, IEEE_1000_ADVERTISE_REG, &control);
+    phy_mdio_read(p, p->phy_addr, IEEE_1000_ADVERTISE_REG, &control);
     control |= ADVERTISE_1000;
-    XEmacPs_PhyWrite(emac, phy_addr, IEEE_1000_ADVERTISE_REG, control);
+    phy_mdio_write(p, p->phy_addr, IEEE_1000_ADVERTISE_REG, control);
 
     /* Advertise 10/100 Mbps capabilities */
-    XEmacPs_PhyRead(emac, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+    phy_mdio_read(p, p->phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
     control |= ADVERTISE_ALL;
-    XEmacPs_PhyWrite(emac, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+    phy_mdio_write(p, p->phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
 
     /* Enable auto-negotiation and restart */
-    XEmacPs_PhyRead(emac, phy_addr, IEEE_CONTROL_REG, &control);
+    phy_mdio_read(p, p->phy_addr, IEEE_CONTROL_REG, &control);
     control |= CTRL_AUTONEG_ENABLE;
     control |= CTRL_RESTART_AUTONEG;
-    XEmacPs_PhyWrite(emac, phy_addr, IEEE_CONTROL_REG, control);
+    phy_mdio_write(p, p->phy_addr, IEEE_CONTROL_REG, control);
 
     /* Wait for auto-negotiation to complete */
     xil_printf("RTL8211E: Waiting for auto-negotiation...\r\n");
     timeout = 50000;
     do {
-        XEmacPs_PhyRead(emac, phy_addr, IEEE_STATUS_REG, &status);
+        phy_mdio_read(p, p->phy_addr, IEEE_STATUS_REG, &status);
         if (timeout-- <= 0) {
             xil_printf("RTL8211E: Auto-negotiation timeout\r\n");
             return -1;
@@ -186,9 +168,9 @@ static int phy_autoneg(XEmacPs *emac, uint32_t phy_addr)
 /* Read speed/duplex/link from RTL8211E specific status register 0x1A */
 static void phy_read_status(struct rtl8211e_priv *p)
 {
-    u16 status;
+    uint16_t status;
 
-    XEmacPs_PhyRead(p->emac, p->phy_addr, RTL8211E_SPECIFIC_STATUS_REG, &status);
+    phy_mdio_read(p, p->phy_addr, RTL8211E_SPECIFIC_STATUS_REG, &status);
 
     /* Speed: bits [15:14] - 00=10M, 01=100M, 10=1000M */
     switch ((status >> 14) & 3) {
@@ -205,38 +187,39 @@ static void phy_read_status(struct rtl8211e_priv *p)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Section 2 (cont): device_ops functions                             */
+/*  Section 3: device_ops functions                                    */
 /* ------------------------------------------------------------------ */
 
 static int rtl8211e_init(struct device *dev)
 {
     struct rtl8211e_priv *p = (struct rtl8211e_priv *)dev->priv;
 
-    p->emac = &g_emac_ps;
+    p->gem_dev = device_find("gem0");
+    if (!p->gem_dev) {
+        xil_printf("RTL8211E: gem0 device not found\r\n");
+        return -1;
+    }
+
     p->speed = 0;
     p->duplex = 0;
     p->link_up = 0;
 
-    /* Detect PHY address on MDIO bus */
-    p->phy_addr = phy_detect_addr(p->emac);
-
-    /* Set SLCR to 1G clock as default before auto-negotiation */
-    slcr_set_gem0_clock(1000);
+    /* Detect PHY address on MDIO bus (MDIO already initialized by gem_driver) */
+    p->phy_addr = phy_detect_addr(p);
 
     /* Software reset PHY */
-    if (phy_reset(p->emac, p->phy_addr) != 0)
+    if (phy_reset(p) != 0)
         return -1;
 
     /* Run auto-negotiation */
-    if (phy_autoneg(p->emac, p->phy_addr) != 0)
+    if (phy_autoneg(p) != 0)
         return -1;
 
     /* Read negotiated result */
     phy_read_status(p);
 
-    /* Reconfigure SLCR clock and MAC speed based on result */
-    slcr_set_gem0_clock(p->speed);
-    XEmacPs_SetOperatingSpeed(p->emac, p->speed);
+    /* Set MAC speed via gem0 (handles both SLCR clock + MAC speed) */
+    device_ioctl(p->gem_dev, GEM_IOCTL_SET_SPEED, &p->speed);
 
     xil_printf("RTL8211E: link=%s speed=%dMbps duplex=%s\r\n",
                p->link_up ? "UP" : "DOWN",
@@ -288,11 +271,10 @@ static int rtl8211e_ioctl(struct device *dev, int cmd, void *arg)
         break;
 
     case PHY_IOCTL_RESTART_AUTONEG:
-        if (phy_autoneg(p->emac, p->phy_addr) != 0)
+        if (phy_autoneg(p) != 0)
             return -1;
         phy_read_status(p);
-        slcr_set_gem0_clock(p->speed);
-        XEmacPs_SetOperatingSpeed(p->emac, p->speed);
+        device_ioctl(p->gem_dev, GEM_IOCTL_SET_SPEED, &p->speed);
         xil_printf("RTL8211E: re-negotiated speed=%d\r\n", p->speed);
         break;
 
@@ -304,7 +286,7 @@ static int rtl8211e_ioctl(struct device *dev, int cmd, void *arg)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Section 3: Ops and device instance                                 */
+/*  Section 4: Ops and device instance                                 */
 /* ------------------------------------------------------------------ */
 
 static const struct device_ops rtl8211e_ops = {

@@ -6,7 +6,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "tx_api.h"
 
 /* 对于ZYNQ 这些地址是不会变的 */
 #if defined (__aarch64__) || defined (__arch64__)					// 64位编译器会自动定义这个宏

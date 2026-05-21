@@ -17,7 +17,7 @@ XUartPs g_uart_ps;
 /* Shared SD PS instance, referenced by sd_driver.c */
 XSdPs   g_sd_ps;
 
-/* Shared EMAC PS instance, referenced by rtl8211e_driver.c and nx_driver_zynq.c */
+/* Shared EMAC PS instance, referenced by gem_driver.c */
 XEmacPs g_emac_ps;
 
 /* Driver entry functions */
@@ -25,6 +25,7 @@ extern void led_driver_init(void);
 extern void key_driver_init(void);
 extern void uart_driver_init(void);
 extern void sd_driver_init(void);
+extern void gem_driver_init(void);
 extern void rtl8211e_driver_init(void);
 
 static void gpio_ps_init(void)
@@ -68,5 +69,6 @@ void board_init()
 	key_driver_init();
 	uart_driver_init();
 	sd_driver_init();
+	gem_driver_init();
 	rtl8211e_driver_init();
 }
