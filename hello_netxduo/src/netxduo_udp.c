@@ -5,7 +5,7 @@
 *	文件名称 : demo_dm9162_netx.c
 *	版    本 : V1.0
 *	说    明 : 测试的功能说明
-*              1. 默认IP地址192.168.245.120，在本文件配置，用户可根据需要修改。
+*              1. 默认IP地址192.168.28.245，在本文件配置，用户可根据需要修改。
 *              2. 可以在电脑端用网络调试软件创建UDP连接此服务器端，端口号1000。
 *              3. 实现了一个简单的回环通信，用户使用上位机发送的数据通过板子返回到上位机。
 *
@@ -31,7 +31,7 @@
 #define IP_ADDR0                        192
 #define IP_ADDR1                        168
 #define IP_ADDR2                        28
-#define IP_ADDR3                        120
+#define IP_ADDR3                        245
 
 /* 本地端口号 */
 #define DEFAULT_PORT                    1000
@@ -51,9 +51,7 @@ static   uint64_t  AppTaskNetXStk[APP_CFG_TASK_NETX_STK_SIZE/8];
 /* 提升NetX应用任务优先级到6 */
 #define  APP_CFG_TASK_NetXPro_PRIO1                        6u
 
-NX_TCP_SOCKET TCPSocket;
 NX_UDP_SOCKET UDPSocket;
-TX_SEMAPHORE  Semaphore;
 
 
 /*
@@ -61,7 +59,7 @@ TX_SEMAPHORE  Semaphore;
 *	                                    NetX任务和通信组件
 *********************************************************************************************************
 */
-UCHAR data_buffer[4096];
+UCHAR data_buffer0[4096];
 
 NX_PACKET_POOL    pool_0;
 NX_IP             ip_0;
@@ -70,11 +68,11 @@ NX_IP             ip_0;
 #define PACKET_SIZE          1536
 #define NX_PACKET_POOL_SIZE  ((PACKET_SIZE + sizeof(NX_PACKET)) * 100)
 
-ULONG  packet_pool_area[NX_PACKET_POOL_SIZE/4 + 4];
+ULONG  packet_pool_area0[NX_PACKET_POOL_SIZE/4 + 4];
 
 /* ARP缓存 */
-ULONG    arp_space_area[512 / sizeof(ULONG)];
-ULONG    error_counter;
+ULONG    arp_space_area0[512 / sizeof(ULONG)];
+ULONG    error_counter0;
 
 #define PRINT_DATA(addr, port, data)        do {                                            \
                                                   printf("[%lu.%lu.%lu.%lu:%u] -> '%s' \n", \
@@ -97,7 +95,7 @@ extern VOID  nx_driver_zynq(NX_IP_DRIVER *driver_req_ptr);
 *	返 回 值: 无
 *********************************************************************************************************
 */
-void NetXTest(void)
+void NetXTest0(void)
 {
     UINT status;
     UINT ret;
@@ -123,11 +121,11 @@ void NetXTest(void)
                                      "NetX Main Packet Pool",                      /* 内存池名 */
                                      1536,                                         /* 内存池每个数据包大小，单位字节
                                                                                       此值必须至少为 40 个字节，并且还必须可以被 4 整除 */
-									 (ULONG*)(((int)packet_pool_area + 15) & ~15) ,/* 内存池地址，此地址必须ULONG对齐 */
+									 (ULONG*)(((int)packet_pool_area0 + 15) & ~15) ,/* 内存池地址，此地址必须ULONG对齐 */
                                      NX_PACKET_POOL_SIZE);                         /* 内存池大小 */
 
     /* 检测创建是否失败 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* 例化IP */
     status = nx_ip_create(&ip_0,                                                   /* IP实例控制块 */
@@ -142,36 +140,36 @@ void NetXTest(void)
 
 
     /* 检测创建是否失败 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* 使能ARP，并提供ARP缓存 */
     status =  nx_arp_enable(&ip_0,                     /* IP实例控制块 */
-							(void *)arp_space_area,    /* ARP缓存地址 */
-							sizeof(arp_space_area));   /* 每个 ARP 条目均为 52 个字节，因此，ARP 条目总数是52字节整数倍 */
+							(void *)arp_space_area0,    /* ARP缓存地址 */
+							sizeof(arp_space_area0));   /* 每个 ARP 条目均为 52 个字节，因此，ARP 条目总数是52字节整数倍 */
 
     /* 使能fragment */
     status = nx_ip_fragment_enable(&ip_0);
 
     /* 检测使能成功 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* 使能TCP */
     status =  nx_tcp_enable(&ip_0);
 
     /* 检测使能成功 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* 使能UDP  */
     status =  nx_udp_enable(&ip_0);
 
     /* 检测使能成功 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* 使能ICMP */
     status =  nx_icmp_enable(&ip_0);
 
     /* 检测使能成功 */
-    if (status) error_counter++;
+    if (status) error_counter0++;
 
     /* NETX初始化完毕后，重新设置优先级 */
     tx_thread_priority_change(netx_thread_ptr, APP_CFG_TASK_NETX_PRIO1, &old_priority);
@@ -211,15 +209,15 @@ void NetXTest(void)
             /* 将UDP数据包中的数据复制到缓冲data_buffer */
             nx_packet_data_extract_offset(RecPacket,            /* 数据包 */
                                           0,                    /* 数据包地址偏移 */
-                                          data_buffer,          /* 目标缓冲 */
-                                          sizeof(data_buffer),  /* 目标缓冲大小 */
+                                          data_buffer0,          /* 目标缓冲 */
+                                          sizeof(data_buffer0),  /* 目标缓冲大小 */
                                           &bytes_read);         /* 数据复制的字节数 */
 
             /* 获取远程端口和IP  */
             nx_udp_source_extract(RecPacket, &source_ip_address, &source_port);
 
             /* 打印接收到数据 */
-            PRINT_DATA(source_ip_address, source_port, data_buffer);
+            PRINT_DATA(source_ip_address, source_port, data_buffer0);
 
             /* 释放数据包 */
             nx_packet_release(RecPacket);

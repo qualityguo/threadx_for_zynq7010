@@ -1,8 +1,8 @@
 /*
- * xemacpsif_physpeed.c - RTL8211E PHY speed configuration for Zynq GEM
+ * rtl8211e_phy.c - RTL8211E PHY speed configuration for Zynq GEM
  *
  * Uses XEmacPs_PhyRead/PhyWrite directly for MDIO access.
- * Provides Phy_Setup() and configure_IEEE_phy_speed() for nx_driver_zynq.
+ * Provides rtl8211e_phy_setup() and rtl8211e_configure_speed() for nx_driver_zynq.
  */
 
 #include "tx_api.h"
@@ -72,7 +72,7 @@
 /*  PHY debug: dump key registers (including PHY ID)                   */
 /* ------------------------------------------------------------------ */
 
-static void phy_dump_regs(XEmacPs *xemacpsp, u32 phy_addr, const char *tag)
+static void rtl8211e_phy_dump_regs(XEmacPs *xemacpsp, u32 phy_addr, const char *tag)
 {
     u16 r0, r1, r2, r3, r4, r5, r9, r10, r1a;
 
@@ -129,7 +129,7 @@ static void rtl8211e_dump_extended(XEmacPs *xemacpsp, u32 phy_addr)
 /*  PHY detection                                                      */
 /* ------------------------------------------------------------------ */
 
-static int detect_phy(XEmacPs *xemacpsp)
+static int rtl8211e_detect_phy(XEmacPs *xemacpsp)
 {
     u16 id1, id2;
     u32 phy_addr;
@@ -153,7 +153,7 @@ static int detect_phy(XEmacPs *xemacpsp)
 /*  PHY reset                                                          */
 /* ------------------------------------------------------------------ */
 
-static int phy_reset(XEmacPs *xemacpsp, u32 phy_addr)
+static int rtl8211e_phy_reset(XEmacPs *xemacpsp, u32 phy_addr)
 {
     u16 control;
     int timeout = 10000;
@@ -209,7 +209,7 @@ static void rtl8211e_rgmii_config(XEmacPs *xemacpsp, u32 phy_addr)
 /*  Returns speed on success, 0 on timeout.                            */
 /* ------------------------------------------------------------------ */
 
-static unsigned wait_for_link(XEmacPs *xemacpsp, u32 phy_addr, int timeout_ticks)
+static unsigned rtl8211e_wait_for_link(XEmacPs *xemacpsp, u32 phy_addr, int timeout_ticks)
 {
     u16 status;
 
@@ -233,8 +233,8 @@ static unsigned wait_for_link(XEmacPs *xemacpsp, u32 phy_addr, int timeout_ticks
 /*  Do auto-negotiation with specified advertisement                   */
 /* ------------------------------------------------------------------ */
 
-static unsigned do_autoneg(XEmacPs *xemacpsp, u32 phy_addr,
-                           u16 adv_1000, u16 adv_10_100, const char *label)
+static unsigned rtl8211e_do_autoneg(XEmacPs *xemacpsp, u32 phy_addr,
+                            u16 adv_1000, u16 adv_10_100, const char *label)
 {
     u16 control, status;
     int timeout;
@@ -242,7 +242,7 @@ static unsigned do_autoneg(XEmacPs *xemacpsp, u32 phy_addr,
     XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET, adv_1000);
     XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, adv_10_100);
 
-//    phy_dump_regs(xemacpsp, phy_addr, label);
+//    rtl8211e_phy_dump_regs(xemacpsp, phy_addr, label);
 
     /* Restart auto-negotiation */
     XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
@@ -260,28 +260,28 @@ static unsigned do_autoneg(XEmacPs *xemacpsp, u32 phy_addr,
     } while (!(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE));
 
     app_printf("RTL8211E: [%s] AN complete, waiting for link...\r\n", label);
-    return wait_for_link(xemacpsp, phy_addr, 500);
+    return rtl8211e_wait_for_link(xemacpsp, phy_addr, 500);
 }
 
 /* ------------------------------------------------------------------ */
 /*  PHY auto-negotiation: 1000M only                                   */
 /* ------------------------------------------------------------------ */
 
-static unsigned get_IEEE_phy_speed(XEmacPs *xemacpsp)
+static unsigned rtl8211e_get_speed(XEmacPs *xemacpsp)
 {
-    u32 phy_addr = detect_phy(xemacpsp);
+    u32 phy_addr = rtl8211e_detect_phy(xemacpsp);
     unsigned speed;
 
-    if (phy_reset(xemacpsp, phy_addr) != 0)
+    if (rtl8211e_phy_reset(xemacpsp, phy_addr) != 0)
         return 10;
 
     rtl8211e_rgmii_config(xemacpsp, phy_addr);
     tx_thread_sleep(50);
 
-//    phy_dump_regs(xemacpsp, phy_addr, "After reset+RGMII cfg");
+//    rtl8211e_phy_dump_regs(xemacpsp, phy_addr, "After reset+RGMII cfg");
 
     app_printf("RTL8211E: === Trying 1000Mbps ===\r\n");
-    speed = do_autoneg(xemacpsp, phy_addr, ADVERTISE_1000,
+    speed = rtl8211e_do_autoneg(xemacpsp, phy_addr, ADVERTISE_1000,
                        ADVERTISE_ALL, "1000M");
     if (speed == 1000) {
         app_printf("RTL8211E: 1000Mbps link UP!\r\n");
@@ -297,10 +297,10 @@ static unsigned get_IEEE_phy_speed(XEmacPs *xemacpsp)
 /*  Configure PHY speed manually                                       */
 /* ------------------------------------------------------------------ */
 
-unsigned configure_IEEE_phy_speed(XEmacPs *xemacpsp, unsigned speed)
+unsigned rtl8211e_configure_speed(XEmacPs *xemacpsp, unsigned speed)
 {
     u16 control;
-    u32 phy_addr = detect_phy(xemacpsp);
+    u32 phy_addr = rtl8211e_detect_phy(xemacpsp);
 
     XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
     control &= ~IEEE_CTRL_LINKSPEED_1000M;
@@ -331,16 +331,16 @@ unsigned configure_IEEE_phy_speed(XEmacPs *xemacpsp, unsigned speed)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Phy_Setup - main entry point called from nx_driver_zynq            */
+/*  rtl8211e_phy_setup - main entry point called from nx_driver_zynq   */
 /* ------------------------------------------------------------------ */
 
-unsigned Phy_Setup(XEmacPs *xemacpsp)
+unsigned rtl8211e_phy_setup(XEmacPs *xemacpsp)
 {
     unsigned link_speed = 1000;
     u32 SlcrTxClkCntrl;
 
 #ifdef CONFIG_LINKSPEED_AUTODETECT
-    link_speed = get_IEEE_phy_speed(xemacpsp);
+    link_speed = rtl8211e_get_speed(xemacpsp);
     app_printf("RTL8211E: auto-negotiated link speed: %d\r\n", link_speed);
 
     if (link_speed == 1000) {

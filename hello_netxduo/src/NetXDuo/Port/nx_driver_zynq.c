@@ -81,8 +81,8 @@ static int          _nx_driver_hardware_packet_transmitted(VOID);
 static int          _nx_driver_hardware_packet_received(VOID);
 
 extern void         XEmacPs_SetMdioDivisor(XEmacPs *InstancePtr, XEmacPs_MdcDiv Divisor);
-extern UINT         Phy_Setup(XEmacPs*);
-extern unsigned     configure_IEEE_phy_speed(XEmacPs *xemacpsp, unsigned speed);
+extern UINT         rtl8211e_phy_setup(XEmacPs*);
+extern unsigned     rtl8211e_configure_speed(XEmacPs *xemacpsp, unsigned speed);
 extern XScuGic      xInterruptController;
 
 #define EMACPS_IRPT_INTR      XPS_GEM0_INT_ID
@@ -919,7 +919,6 @@ static UINT  _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
 	XEmacPs_Config       *config;
 	int                  ret;
 	XEmacPs_Bd           BdTemplate;
-	int                  SlcrTxClkCntrl;
 	int                  link_speed;
 	NX_PACKET           *packet_ptr;
 
@@ -931,23 +930,10 @@ static UINT  _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
     Xil_SetTlbAttributes(0x0FF00000, 0xc02);
     app_printf("[GEM] BD memory non-cacheable\r\n");
 
-    // second: SLCR clock cfg
-    /* SLCR unlock */
-    *(volatile UINT*)(SLCR_UNLOCK_ADDR) = SLCR_UNLOCK_KEY_VALUE;
+    /* SLCR clock config is done in rtl8211e_phy_setup() after
+       auto-negotiation, so the divisors match the actual link speed. */
 
-    /* Set up GEM0 1G clock configuration. */
-    SlcrTxClkCntrl = *(volatile UINT*)(SLCR_GEM0_CLK_CTRL_ADDR);
-    SlcrTxClkCntrl &= EMACPS_SLCR_DIV_MASK;
-    SlcrTxClkCntrl |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_1000MBPS_DIV1 << 20);
-    SlcrTxClkCntrl |= (XPAR_PS7_ETHERNET_0_ENET_SLCR_1000MBPS_DIV0 << 8);
-    *(volatile UINT*)(SLCR_GEM0_CLK_CTRL_ADDR) = SlcrTxClkCntrl;
-
-    /* SLCR lock */
-    *(volatile UINT*)(SLCR_LOCK_ADDR) = SLCR_LOCK_KEY_VALUE;
-
-    tx_thread_sleep(100);
-
-    // three: gem init
+    // two: gem init
     config = XEmacPs_LookupConfig(XPAR_PS7_ETHERNET_0_DEVICE_ID);
     instance_ptr = &nx_driver_information.nx_driver_instance;
 
@@ -1055,12 +1041,12 @@ static UINT  _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
 
 
     /* Set the operation speed via auto-negotiation */
-    link_speed = Phy_Setup(instance_ptr);
+    link_speed = rtl8211e_phy_setup(instance_ptr);
     app_printf("link_speed is %d\n", link_speed);
 
-    /* Do NOT call configure_IEEE_phy_speed() here - it resets the PHY
+    /* Do NOT call rtl8211e_configure_speed() here - it resets the PHY
        and destroys the auto-negotiation result just established by
-       Phy_Setup(), causing the link to fall back to 10Mbps. */
+       rtl8211e_phy_setup(), causing the link to fall back to 10Mbps. */
 
     XEmacPs_SetOperatingSpeed(instance_ptr, link_speed);
 
@@ -1091,22 +1077,6 @@ static UINT  _nx_driver_hardware_initialize(NX_IP_DRIVER *driver_req_ptr)
     XEmacPs_SetOptions(instance_ptr, (XEMACPS_RX_CHKSUM_ENABLE_OPTION | XEMACPS_TX_CHKSUM_ENABLE_OPTION |XEMACPS_MULTICAST_OPTION)|XEMACPS_PROMISC_OPTION);
 
     XEmacPs_WriteReg(instance_ptr -> Config.BaseAddress, XEMACPS_DMACR_OFFSET, 0x00190F10);
-
-    /* Wait for PHY link to be ready after configure_IEEE_phy_speed reset */
-    {
-        u16 phy_status;
-        int retry = 100;
-        do {
-            XEmacPs_PhyRead(instance_ptr, 1, 1, &phy_status);
-            if (phy_status & 0x0004)
-                break;
-            tx_thread_sleep(10);
-        } while (retry-- > 0);
-        if (phy_status & 0x0004)
-            app_printf("PHY link UP\r\n");
-        else
-            app_printf("PHY link DOWN after reset!\r\n");
-    }
 
     /* Return success!  */
     return(NX_SUCCESS);
@@ -1165,6 +1135,26 @@ static UINT  _nx_driver_hardware_enable(NX_IP_DRIVER *driver_req_ptr)
 /**************************************************************************/
 static UINT  _nx_driver_hardware_disable(NX_IP_DRIVER *driver_req_ptr)
 {
+	XEmacPs    *instance_ptr;
+
+    instance_ptr = &nx_driver_information.nx_driver_instance;
+
+    /* Disable GEM interrupts in IER */
+    XEmacPs_IntDisable(instance_ptr, XEMACPS_IXR_FRAMERX_MASK |
+                                     XEMACPS_IXR_RXUSED_MASK  |
+                                     XEMACPS_IXR_RXOVR_MASK   |
+                                     XEMACPS_IXR_TXCOMPL_MASK |
+                                     XEMACPS_IXR_TXEXH_MASK   |
+                                     XEMACPS_IXR_RETRY_MASK   |
+                                     XEMACPS_IXR_URUN_MASK);
+
+    /* Stop the device (disables TX/RX in NWCTRL) */
+    XEmacPs_Stop(instance_ptr);
+
+    /* Disable interrupt at GIC */
+    XScuGic_Disable(&xInterruptController, XPS_GEM0_INT_ID);
+
+    app_printf("[GEM] link disabled, int off\r\n");
 
     /* Return success!  */
     return(NX_SUCCESS);
@@ -1185,62 +1175,89 @@ static UINT  _nx_driver_hardware_disable(NX_IP_DRIVER *driver_req_ptr)
 static UINT  _nx_driver_hardware_packet_send(NX_PACKET *packet_ptr)
 {
 	int         ret;
+	UINT        num_segments;
 	XEmacPs     *instance_ptr;
 	XEmacPs_Bd  *bdSetPtr;
+	XEmacPs_Bd  *curBdPtr;
+	XEmacPs_Bd  *lastBdPtr;
 	NX_PACKET   *tmp_ptr;
 	ULONG       curIdx;
 	TX_INTERRUPT_SAVE_AREA
 
     instance_ptr = &nx_driver_information.nx_driver_instance;
 
+    /* Count the number of segments in the packet chain. */
+    num_segments = 0;
+    for(tmp_ptr = packet_ptr; tmp_ptr != NX_NULL; tmp_ptr = tmp_ptr -> nx_packet_next)
+    {
+        num_segments++;
+    }
+
     TX_DISABLE
 
-    /* Allocate a transmit BD */
-    ret = XEmacPs_BdRingAlloc(&(XEmacPs_GetTxRing(instance_ptr)), 1, &bdSetPtr);
-    Xil_AssertNonvoid(ret == XST_SUCCESS);
+    /* Allocate BDs for all segments at once. */
+    ret = XEmacPs_BdRingAlloc(&(XEmacPs_GetTxRing(instance_ptr)), num_segments, &bdSetPtr);
+    if(ret != XST_SUCCESS)
+    {
+        TX_RESTORE
+        return(NX_DRIVER_ERROR);
+    }
+
+    /* Setup each BD: flush cache, set address, set length, clear LAST.
+       Track last BD inside the loop to avoid a second traversal. */
+    curBdPtr = bdSetPtr;
+    lastBdPtr = bdSetPtr;
 
     for(tmp_ptr = packet_ptr; tmp_ptr != NX_NULL; tmp_ptr = tmp_ptr -> nx_packet_next)
     {
-        /* Pick up the first BD. */
         curIdx = nx_driver_information.nx_driver_information_transmit_current_index;
-        /* Save the pkt pointer to release.  */
-        if(nx_driver_information.nx_driver_information_transmit_packets[curIdx] == NX_NULL)
+
+        if(tmp_ptr == packet_ptr)
         {
             nx_driver_information.nx_driver_information_transmit_packets[curIdx] = tmp_ptr;
         }
-        else
-        {
-            /* Error! */
-            app_printf("tx non-null ptr fail\n\r");
-        }
 
-        /* Set the current index to the next descriptor.  */
-        nx_driver_information.nx_driver_information_transmit_current_index = (curIdx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
+        nx_driver_information.nx_driver_information_transmit_current_index =
+            (curIdx + 1) & (NX_DRIVER_TX_DESCRIPTORS - 1);
 
-        Xil_DCacheFlushRange((u32)(packet_ptr -> nx_packet_prepend_ptr), packet_ptr -> nx_packet_length);
+        UINT seg_len = (UINT)(tmp_ptr -> nx_packet_append_ptr) - (UINT)(tmp_ptr -> nx_packet_prepend_ptr);
 
-        XEmacPs_BdSetAddressTx(bdSetPtr, packet_ptr -> nx_packet_prepend_ptr);
+        Xil_DCacheFlushRange((UINTPTR)(tmp_ptr -> nx_packet_prepend_ptr), seg_len);
 
-        XEmacPs_BdSetLength(bdSetPtr, packet_ptr -> nx_packet_length);
-        XEmacPs_BdClearLast(bdSetPtr);
-        dmb();
-        dsb();
+        XEmacPs_BdSetAddressTx(curBdPtr, (tmp_ptr -> nx_packet_prepend_ptr));
+        XEmacPs_BdSetLength(curBdPtr, seg_len);
+        XEmacPs_BdClearLast(curBdPtr);
+
+        lastBdPtr = curBdPtr;
+        curBdPtr = XEmacPs_BdRingNext(&(XEmacPs_GetTxRing(instance_ptr)), curBdPtr);
     }
 
-    XEmacPs_BdSetLast(bdSetPtr);
-    dmb();
-    dsb();
+    /* Mark the last BD. */
+    XEmacPs_BdSetLast(lastBdPtr);
 
-    /* Send the packet to the transmit logic. */
-    ret = XEmacPs_BdRingToHw(&(XEmacPs_GetTxRing(instance_ptr)), 1, bdSetPtr);
-    Xil_AssertNonvoid(ret == XST_SUCCESS);
-
+    /* Clear USED bits: non-first segments first, then the first segment last.
+       GEM hardware scans from the first BD clearing it last ensures all BDs
+       are ready before the hardware sees the first one as available. */
+    curBdPtr = XEmacPs_BdRingNext(&(XEmacPs_GetTxRing(instance_ptr)), bdSetPtr);
+    for(UINT i = 1; i < num_segments; i++)
+    {
+        XEmacPs_BdClearTxUsed(curBdPtr);
+        dsb();
+        curBdPtr = XEmacPs_BdRingNext(&(XEmacPs_GetTxRing(instance_ptr)), curBdPtr);
+    }
     XEmacPs_BdClearTxUsed(bdSetPtr);
-
-    XEmacPs_Transmit(instance_ptr);
-
-    dmb();
     dsb();
+
+    /* Submit all BDs to hardware ring management. */
+    ret = XEmacPs_BdRingToHw(&(XEmacPs_GetTxRing(instance_ptr)), num_segments, bdSetPtr);
+    if(ret != XST_SUCCESS)
+    {
+        TX_RESTORE
+        return(NX_DRIVER_ERROR);
+    }
+
+    /* Start transmit. */
+    XEmacPs_Transmit(instance_ptr);
 
     TX_RESTORE
     return(NX_SUCCESS);

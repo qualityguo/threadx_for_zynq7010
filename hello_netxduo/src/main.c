@@ -279,7 +279,9 @@ static  void  AppTaskKEY          (ULONG thread_input)
 	优 先 级: 上电是29，网线插入后提升至6
 *********************************************************************************************************
 */
-extern void NetXTest(void);
+extern void NetXTest0(void);
+extern void NetXTest1(void);
+extern void NetXTest2(void);
 static void AppTaskNetXPro(ULONG thread_input)
 {
     (void)thread_input;
@@ -287,7 +289,7 @@ static void AppTaskNetXPro(ULONG thread_input)
     tx_thread_sleep(1000);
 	while(1)
 	{
-        NetXTest();
+        NetXTest2();
 	}
 }
 
