@@ -53,3 +53,28 @@ platform generate
 platform active {zynq7010}
 bsp reload
 platform generate -domains 
+platform active {zynq7010}
+bsp reload
+platform generate -domains 
+bsp reload
+bsp config stdin "ps7_coresight_comp_0"
+bsp config stdout "ps7_coresight_comp_0"
+bsp write
+bsp reload
+catch {bsp regenerate}
+platform generate -domains standalone_ps7_cortexa9_0 
+bsp config stdout "ps7_uart_1"
+bsp config stdin "ps7_uart_1"
+bsp write
+bsp reload
+catch {bsp regenerate}
+bsp config stdin "ps7_uart_1"
+bsp config stdout "ps7_uart_1"
+bsp config stdin "ps7_coresight_comp_0"
+bsp config ttc_select_cntr "2"
+bsp config stdout "ps7_coresight_comp_0"
+bsp write
+bsp reload
+catch {bsp regenerate}
+platform generate -domains standalone_ps7_cortexa9_0 
+bsp reload

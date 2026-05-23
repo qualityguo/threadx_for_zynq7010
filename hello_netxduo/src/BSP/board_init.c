@@ -3,8 +3,6 @@
 #include "xgpiops.h"
 #include "xuartps.h"
 #include "xsdps.h"
-#include "xemacps.h"
-#include "xil_mmu.h"
 #include "xparameters.h"
 #include "xil_printf.h"
 
@@ -17,16 +15,11 @@ XUartPs g_uart_ps;
 /* Shared SD PS instance, referenced by sd_driver.c */
 XSdPs   g_sd_ps;
 
-/* Shared EMAC PS instance, referenced by gem_driver.c */
-XEmacPs g_emac_ps;
-
 /* Driver entry functions */
 extern void led_driver_init(void);
 extern void key_driver_init(void);
 extern void uart_driver_init(void);
 extern void sd_driver_init(void);
-extern void gem_driver_init(void);
-extern void rtl8211e_driver_init(void);
 
 static void gpio_ps_init(void)
 {
@@ -50,25 +43,13 @@ static void sd_ps_init(void)
 		   ret == XST_SUCCESS ? "OK" : "FAIL", g_sd_ps.SectorCount);
 }
 
-static void emac_ps_init(void)
-{
-	/* Mark BD memory region (0x0FF00000, 2MB) as non-cacheable */
-	Xil_SetTlbAttributes(0x0FF00000, 0xc02);
-
-	XEmacPs_Config *cfg = XEmacPs_LookupConfig(XPAR_PS7_ETHERNET_0_DEVICE_ID);
-	XEmacPs_CfgInitialize(&g_emac_ps, cfg, cfg->BaseAddress);
-}
-
 void board_init()
 {
 	gpio_ps_init();
 	uart_ps_init();
 	sd_ps_init();
-	emac_ps_init();
 	led_driver_init();
 	key_driver_init();
 	uart_driver_init();
 	sd_driver_init();
-	gem_driver_init();
-	rtl8211e_driver_init();
 }

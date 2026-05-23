@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="ASCII"?>
-<sdkproject:SdkProject xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:sdkproject="http://www.xilinx.com/sdkproject" name="hello_filex" location="D:/RTOS_Study/threadx/vitis/hello_filex" platform="D:/RTOS_Study/threadx/vitis/zynq7010/export/zynq7010/zynq7010.xpfm" platformUID="xilinx:::0.0(custom)" systemProject="hello_filex_system" sysConfig="zynq7010" runtime="C/C++" cpu="standalone_ps7_cortexa9_0" cpuInstance="ps7_cortexa9_0" os="standalone" mssSignature="7da266686875b5c2926b3f0f6ae1c56b">
+<sdkproject:SdkProject xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:sdkproject="http://www.xilinx.com/sdkproject" name="hello_filex" location="D:/RTOS_Study/threadx/vitis/hello_filex" platform="D:/RTOS_Study/threadx/vitis/zynq7010/export/zynq7010/zynq7010.xpfm" platformUID="xilinx:::0.0(custom)" systemProject="hello_filex_system" sysConfig="zynq7010" runtime="C/C++" cpu="standalone_ps7_cortexa9_0" cpuInstance="ps7_cortexa9_0" os="standalone" mssSignature="68d2511f68a25e1806a95b7849424b7b">
   <configuration name="Debug" id="xilinx.gnu.armv7.exe.debug.1915381788">
     <configBuildOptions xsi:type="sdkproject:SdkOptions"/>
     <lastBuildOptions xsi:type="sdkproject:SdkOptions"/>

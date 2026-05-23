@@ -8,6 +8,12 @@
 */
 #define  APP_CFG_TASK_START_PRIO                     	2u
 #define	 APP_CFG_TASK_LED_PRIO							20u					// LED闪烁任务
+#define  APP_CFG_TASK_KEY_PRIO							21u					// KEY任务
+#define  APP_CFG_TASK_NetXPro_PRIO                      29u					// 未插入网线前
+	/* 在netxduo_udp.c定义，网线插入后从29提升到6 */
+	//#define  APP_CFG_TASK_NetXPro_PRIO                      29u
+	//#define  APP_CFG_TASK_NetXPro_PRIO1                     6u
+
 
 /*
 *********************************************************************************************************
@@ -16,6 +22,8 @@
 */
 #define  APP_CFG_TASK_START_STK_SIZE                    4096u
 #define	 APP_CFG_TASK_LED_STK_SIZE						1024u
+#define	 APP_CFG_TASK_KEY_STK_SIZE						4096u
+#define  APP_CFG_TASK_NETXPRO_STK_SIZE                  4096u
 
 /*
 *********************************************************************************************************
@@ -26,7 +34,10 @@ static  TX_THREAD   AppTaskStartTCB;
 static  uint64_t    AppTaskStartStk[APP_CFG_TASK_START_STK_SIZE/8];
 static  TX_THREAD   AppTaskLEDTCB;
 static  uint64_t    AppTaskLEDStk[APP_CFG_TASK_LED_STK_SIZE/8];
-
+static  TX_THREAD   AppTaskKEYTCB;
+static  uint64_t    AppTaskKEYStk[APP_CFG_TASK_KEY_STK_SIZE/8];
+		TX_THREAD   AppTaskNetXProTCB;
+static  uint64_t    AppTaskNetXProStk[APP_CFG_TASK_NETXPRO_STK_SIZE/8];
 /*
 *********************************************************************************************************
 *                                      函数声明
@@ -34,6 +45,8 @@ static  uint64_t    AppTaskLEDStk[APP_CFG_TASK_LED_STK_SIZE/8];
 */
 static  void  AppTaskStart          (ULONG thread_input);
 static	void  AppTaskLED			(ULONG thread_input);
+static	void  AppTaskKEY			(ULONG thread_input);
+static  void  AppTaskNetXPro		(ULONG thread_input);
 static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
@@ -45,6 +58,8 @@ static 	void  DispTaskInfo			(void);
 *                               		宏
 *******************************************************************************************************
 */
+#define EVENT_KEY0					(1<<0)
+#define EVENT_KEY1					(1<<1)
 #define TRACE_BUFFER_SIZE 			(500 * 32)  		/* 500个事件的存储空间 */
 #define TRACE_MAX_OBJECTS  			20         			/* 最多跟踪的ThreadX对象数量 */
 
@@ -54,6 +69,7 @@ static 	void  DispTaskInfo			(void);
 *******************************************************************************************************
 */
 static 	TX_MUTEX 				AppPrintfSemp;			/* 用于printf互斥 */
+static  TX_EVENT_FLAGS_GROUP	key_event_group;		/* key中断通知任务事件标志组 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
 static  volatile uint32_t		base_time;				/* 低精度时间计数-10ms */
 
@@ -70,7 +86,7 @@ UCHAR 	g_trace_buffer[TRACE_BUFFER_SIZE];				/* 缓冲区对象 */
 */
 int main()
 {
-	xil_printf("Hello Threadx!\r\n");
+	xil_printf("Hello NetXDuo!\r\n");
 
 	bsp_init();
 	board_init();
@@ -195,6 +211,89 @@ static  void  AppTaskLED          (ULONG thread_input)
 
 /*
 *********************************************************************************************************
+*	函 数 名: AppTaskKEY
+*	功能说明: 按键打印信息+发送消息
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 9
+*********************************************************************************************************
+*/
+void key0_cb(struct device *dev, uint32_t event)
+{
+	tx_event_flags_set(&key_event_group, EVENT_KEY0, TX_OR);
+}
+void key1_cb(struct device *dev, uint32_t event)
+{
+	tx_event_flags_set(&key_event_group, EVENT_KEY1, TX_OR);
+}
+
+
+static  void  AppTaskKEY          (ULONG thread_input)
+{
+	(void)thread_input;
+	UINT status;
+	struct device *pkey0 = device_find("key0");
+	struct device *pkey1 = device_find("key1");
+	uint8_t val0 = 0;
+//	uint8_t val1 = 0;
+	static  ULONG 					event_flags_value;		/* 事件标志暂存 */
+
+	device_ioctl(pkey0, DEV_IOCTL_SET_NOTIFY, key0_cb);
+	device_ioctl(pkey1, DEV_IOCTL_SET_NOTIFY, key1_cb);
+
+	while(1)
+	{
+		// 等待事件标志更新
+		status = tx_event_flags_get(&key_event_group,
+									EVENT_KEY0|EVENT_KEY1,
+									TX_OR_CLEAR, 					// OR+CLEAR
+									&event_flags_value,
+									TX_WAIT_FOREVER);				// 无线等待
+
+		if(status == TX_SUCCESS)
+		{
+			if(event_flags_value & EVENT_KEY0)			// key0按下打印信息
+			{
+				tx_thread_sleep(2);				// 延时20ms-消抖
+				device_read(pkey0, &val0, 1);
+				if(val0 == 1)
+				{
+					DispTaskInfo();
+				}
+			}
+			if(event_flags_value & EVENT_KEY1)			// key1按下发送消息
+			{
+				// do nothing
+			}
+
+		}
+	}
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: AppTaskNetXPro
+*	功能说明: 消息处理，这里用作NetX网络任务处理
+*	形    参: thread_input 是在创建该任务时传递的形参
+*	返 回 值: 无
+	优 先 级: 上电是29，网线插入后提升至6
+*********************************************************************************************************
+*/
+extern void NetXTest(void);
+static void AppTaskNetXPro(ULONG thread_input)
+{
+    (void)thread_input;
+
+    tx_thread_sleep(1000);
+	while(1)
+	{
+        NetXTest();
+	}
+}
+
+
+/*
+*********************************************************************************************************
 *	函 数 名: AppTaskCreate
 *	功能说明: 创建应用任务
 *	形    参: 无
@@ -214,6 +313,28 @@ static  void  AppTaskCreate (void)
 					  APP_CFG_TASK_LED_PRIO,    	 	/* 任务抢占阀值 */
 					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
 					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建KEY任务*********************/
+	tx_thread_create(&AppTaskKEYTCB,	              	/* 任务控制块地址 */
+					  "App Task KEY",		            /* 任务名 */
+					  AppTaskKEY,                 		/* 启动任务函数地址 */
+					  0,                             	/* 传递给任务的参数 */
+					  &AppTaskKEYStk[0],		        /* 堆栈基地址 */
+					  APP_CFG_TASK_KEY_STK_SIZE, 		/* 堆栈空间大小 */
+					  APP_CFG_TASK_KEY_PRIO,     		/* 任务优先级*/
+					  APP_CFG_TASK_KEY_PRIO,    	 	/* 任务抢占阀值 */
+					  TX_NO_TIME_SLICE,               	/* 不开启时间片 */
+					  TX_AUTO_START);                 	/* 创建后立即启动 */
+	/**************创建NetX处理任务*********************/
+    tx_thread_create(&AppTaskNetXProTCB,               	/* 任务控制块地址 */
+                      "App NETX Pro",                   /* 任务名 */
+                       AppTaskNetXPro,                  /* 启动任务函数地址 */
+                       0,                           	/* 传递给任务的参数 */
+                       &AppTaskNetXProStk[0],           /* 堆栈基地址 */
+                       APP_CFG_TASK_NETXPRO_STK_SIZE,   /* 堆栈空间大小 */
+                       APP_CFG_TASK_NetXPro_PRIO,    	/* 任务优先级*/
+                       APP_CFG_TASK_NetXPro_PRIO,    	/* 任务抢占阀值 */
+                       TX_NO_TIME_SLICE,             	/* 不开启时间片 */
+                       TX_AUTO_START);               	/* 创建后立即启动 */
 }
 
 /*
@@ -242,6 +363,8 @@ static  void  AppObjCreate (void)
 {
 	/* 创建互斥信号量 */
 	tx_mutex_create(&AppPrintfSemp,"AppPrintfSemp",TX_NO_INHERIT);
+	/* 创建事件标志组 */
+	tx_event_flags_create(&key_event_group, "key_event_group");
 
 }
 
