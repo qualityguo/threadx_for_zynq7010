@@ -38,3 +38,6 @@ logs/
 # opencode (but track skills)
 .opencode/*
 !.opencode/skills/
+
+# tarcex-file
+*.trx

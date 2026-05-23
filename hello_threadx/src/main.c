@@ -58,6 +58,7 @@ static  void  AppTaskCreate 		(void);
 static  void  AppObjCreate 			(void);
 static  void  App_Printf 			(const char *fmt, ...);
 static 	void  DispTaskInfo			(void);
+	uint32_t  GetRunTime			(void);
 
 /*
 *******************************************************************************************************
@@ -66,7 +67,8 @@ static 	void  DispTaskInfo			(void);
 */
 #define EVENT_KEY0					(1<<0)
 #define EVENT_KEY1					(1<<1)
-
+#define TRACE_BUFFER_SIZE 			(500 * 32)  		/* 500个事件的存储空间 */
+#define TRACE_MAX_OBJECTS  			20         			/* 最多跟踪的ThreadX对象数量 */
 
 /*
 *******************************************************************************************************
@@ -80,6 +82,10 @@ static  TX_QUEUE				my_msg_queue;			/* 任务通信消息队列 */
 static  TX_SEMAPHORE			uart_semaphore;			/* 串口数据达到信号量 */
 static  TX_TIMER  				AppTimer;				/* 软件定时器 */
 volatile double 				OSCPUUsage;       	   	/* CPU百分比 */
+static  volatile uint32_t		base_time;				/* 低精度时间计数-10ms */
+
+UCHAR 	g_trace_buffer[TRACE_BUFFER_SIZE];				/* 缓冲区对象 */
+
 
 
 typedef struct Msg
@@ -161,6 +167,8 @@ static  void  AppTaskStart (ULONG thread_input)
 	tx_thread_resume(&_tx_timer_thread);
 #endif
 
+	base_time = 0;				/* 用作低精度的时间计数-500ms单位 */
+
 	/* 创建任务 */
     AppTaskCreate();
 
@@ -171,10 +179,16 @@ static  void  AppTaskStart (ULONG thread_input)
 	IdleTime = _tx_execution_idle_time_total;
 	TolTime = _tx_execution_thread_time_total + _tx_execution_isr_time_total + _tx_execution_idle_time_total;
 
+	/* 启动任务跟踪 */
+	tx_trace_enable(&g_trace_buffer, 					/* 存储地址 */
+					TRACE_BUFFER_SIZE,					/* buffer大小 */
+					TRACE_MAX_OBJECTS);					/* 对象数量 */
+
     while (1)
 	{
     	/* CPU利用率统计 */
     	uiCount++;
+    	base_time += 10;
     	if(uiCount == 200)
     	{
     		uiCount = 0;
@@ -381,8 +395,8 @@ static  void  AppTaskUartRecv		(ULONG thread_input)
 	UINT status;
 	struct device *puart1 = device_find("uart1");
 	device_ioctl(puart1, DEV_IOCTL_SET_NOTIFY, uart1_cb);
-	uint8_t tmp_buf[256];			// 大于等于循环缓冲区的长度
 	int n = 0;
+	uint8_t tmp_buf[256];			// 大于等于循环缓冲区的长度
 
 	while(1)
 	{
@@ -390,11 +404,9 @@ static  void  AppTaskUartRecv		(ULONG thread_input)
 		if(status == TX_SUCCESS)
 		{
 			n = device_read(puart1, tmp_buf, sizeof(tmp_buf));
-			/* 成功接收，打印消息 */
-			App_Printf("接收串口数据，长度:%d\r\n", n);
-			/* 回显 */
-			n = device_write(puart1, tmp_buf, n);
-			App_Printf("发送串口数据，长度:%d\r\n", n);
+			App_Printf("串口接收数据长度:%d\r\n", n);
+			device_write(puart1, tmp_buf, n);
+			App_Printf("串口发送数据长度:%d\r\n", n);
 		}
 
 	}
@@ -483,6 +495,19 @@ void TimerCallback(ULONG thread_input)
 	device_write(pled1, &led1_val, 1);
 	led1_val = (led1_val==1)? 0 : 1;
 }
+/*
+*********************************************************************************************************
+*	函 数 名: GetRunTime
+*	功能说明: 获得运行时间
+*	形    参: void
+*	返 回 值: uint32_t
+*********************************************************************************************************
+*/
+uint32_t  GetRunTime			(void)
+{
+	return base_time;
+}
+
 
 /*
 *********************************************************************************************************
