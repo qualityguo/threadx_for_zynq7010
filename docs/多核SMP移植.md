@@ -198,4 +198,35 @@
   | tx_timer_smp_core_exclude      | 设置系统定时器不能在哪些核心上触发 |
   | tx_timer_smp_core_exclude_get  | 获得系统定时器的核心排除掩码       |
 
-  
+
+## 第三章：单核和多核的性能比较
+
+- 单核环境下运行两个计算任务，一个打印任务，一个sleep任务（优先级很高）
+
+  - ```
+    [13:11:46.556] [Core0] Relative Time: 20 s
+    [13:11:46.557] [Core0] Task0 cal count:  276551
+    [13:11:46.557] [Core0] Task1 cal count:  276551
+    [13:12:06.577] [Core0] Relative Time: 40 s
+    [13:12:06.577] [Core0] Task0 cal count:  276302
+    [13:12:06.577] [Core0] Task1 cal count:  276552
+    [13:12:26.646] [Core0] Relative Time: 60 s
+    [13:12:26.647] [Core0] Task0 cal count:  276513
+    [13:12:26.647] [Core0] Task1 cal count:  276552
+    ```
+
+- 单核环境下运行两个计算任务，一个打印任务（强制设置到核1），一个sleep任务（优先级很高）
+
+  - ```
+    [13:15:49.167] [Core1] Relative Time: 20 s
+    [13:15:49.167] [Core1] Task0 cal count:  452800
+    [13:15:49.167] [Core1] Task1 cal count:  450658
+    [13:16:09.208] [Core1] Relative Time: 40 s
+    [13:16:09.208] [Core1] Task0 cal count:  455981
+    [13:16:09.208] [Core1] Task1 cal count:  446646
+    [13:16:29.196] [Core1] Relative Time: 60 s
+    [13:16:29.196] [Core1] Task0 cal count:  455415
+    [13:16:29.196] [Core1] Task1 cal count:  446606
+    ```
+
+- 大概有`902021/553065=1.6`倍的性能提升，因为不是将所有的能力都放到了CPU计算性能上，还有一部分是达到了内存带宽的限制

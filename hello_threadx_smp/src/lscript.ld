@@ -10,10 +10,11 @@
 /*                                                                 */
 /*******************************************************************/
 
-/* SMP: IRQ/SVC stacks cover 2 cores. Startup offsets by CPU_ID * per_core_slice.
-   SYS stack only used during early boot mode-switching, kept small.
-   ABORT/FIQ stacks same as single-core (exception handler debug only).
-   IRQ:   0x1000 = 2 * 0x800    SVC:  0x2000 = 2 * 0x1000   */
+/* Unified linker script for both single-core and SMP (dual-core).
+   IRQ/SVC stack defaults cover 2 cores; single-core build simply
+   uses less of the allocated space.  The per-core offset is computed
+   at runtime in startup.S (SMP) or ignored (single-core). */
+
 _STACK_SIZE = DEFINED(_STACK_SIZE) ? _STACK_SIZE : 0x2000;
 _HEAP_SIZE = DEFINED(_HEAP_SIZE) ? _HEAP_SIZE : 0x2000;
 
@@ -261,8 +262,13 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    HeapLimit = .;
 } > ps7_ddr_0
 
-/* SMP: SYS/IRQ/SVC stacks cover 2 cores with CPU_ID offset.
-   ABORT/FIQ/UNDEF use single-core sizes (exception debug only). */
+/* Stack layout (top-down):
+     SYS  (_STACK_SIZE)
+     IRQ  (_IRQ_STACK_SIZE)      -- SMP: 2 cores share, offset by CPU_ID*0x800
+     SVC  (_SUPERVISOR_STACK_SIZE) -- SMP: 2 cores share, offset by CPU_ID*0x1000
+     ABT  (_ABORT_STACK_SIZE)
+     FIQ  (_FIQ_STACK_SIZE)
+     UND  (_UNDEF_STACK_SIZE)    -- _sp points here (top of region) */
 .stack (NOLOAD) : {
    . = ALIGN(16);
    _stack_end = .;

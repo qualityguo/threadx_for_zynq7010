@@ -10,12 +10,17 @@
 /*                                                                 */
 /*******************************************************************/
 
+/* Unified linker script for both single-core and SMP (dual-core).
+   IRQ/SVC stack defaults cover 2 cores; single-core build simply
+   uses less of the allocated space.  The per-core offset is computed
+   at runtime in startup.S (SMP) or ignored (single-core). */
+
 _STACK_SIZE = DEFINED(_STACK_SIZE) ? _STACK_SIZE : 0x2000;
 _HEAP_SIZE = DEFINED(_HEAP_SIZE) ? _HEAP_SIZE : 0x2000;
 
 _ABORT_STACK_SIZE = DEFINED(_ABORT_STACK_SIZE) ? _ABORT_STACK_SIZE : 1024;
-_SUPERVISOR_STACK_SIZE = DEFINED(_SUPERVISOR_STACK_SIZE) ? _SUPERVISOR_STACK_SIZE : 2048;
-_IRQ_STACK_SIZE = DEFINED(_IRQ_STACK_SIZE) ? _IRQ_STACK_SIZE : 1024;
+_SUPERVISOR_STACK_SIZE = DEFINED(_SUPERVISOR_STACK_SIZE) ? _SUPERVISOR_STACK_SIZE : 0x2000;
+_IRQ_STACK_SIZE = DEFINED(_IRQ_STACK_SIZE) ? _IRQ_STACK_SIZE : 0x1000;
 _FIQ_STACK_SIZE = DEFINED(_FIQ_STACK_SIZE) ? _FIQ_STACK_SIZE : 1024;
 _UNDEF_STACK_SIZE = DEFINED(_UNDEF_STACK_SIZE) ? _UNDEF_STACK_SIZE : 1024;
 
@@ -257,6 +262,13 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    HeapLimit = .;
 } > ps7_ddr_0
 
+/* Stack layout (top-down):
+     SYS  (_STACK_SIZE)
+     IRQ  (_IRQ_STACK_SIZE)      -- SMP: 2 cores share, offset by CPU_ID*0x800
+     SVC  (_SUPERVISOR_STACK_SIZE) -- SMP: 2 cores share, offset by CPU_ID*0x1000
+     ABT  (_ABORT_STACK_SIZE)
+     FIQ  (_FIQ_STACK_SIZE)
+     UND  (_UNDEF_STACK_SIZE)    -- _sp points here (top of region) */
 .stack (NOLOAD) : {
    . = ALIGN(16);
    _stack_end = .;
@@ -287,10 +299,5 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    __undef_stack = .;
 } > ps7_ddr_0
 
-/* ThreadX stack symbols - reuse entire bare-metal stack region */
-_sp = __undef_stack;
-_stack_bottom = _stack_end;
-
 _end = .;
 }
-

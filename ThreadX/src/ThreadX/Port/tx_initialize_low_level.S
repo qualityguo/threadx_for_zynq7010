@@ -28,9 +28,7 @@ SVC_MODE        =       0xD3                    // Disable IRQ/FIQ SVC mode
 IRQ_MODE        =       0xD2                    // Disable IRQ/FIQ IRQ mode
 FIQ_MODE        =       0xD1                    // Disable IRQ/FIQ FIQ mode
 SYS_MODE        =       0xDF                    // Disable IRQ/FIQ SYS mode
-FIQ_STACK_SIZE  =       512                     // FIQ stack size
-IRQ_STACK_SIZE  =       1024                    // IRQ stack size
-SYS_STACK_SIZE  =       1024                    // System stack size
+
 
     .global     _tx_thread_system_stack_ptr
     .global     _tx_initialize_unused_memory
@@ -38,8 +36,7 @@ SYS_STACK_SIZE  =       1024                    // System stack size
     .global     _tx_thread_context_restore
     .global     _tx_timer_interrupt
     .global     _end
-    .global     _sp
-    .global     _stack_bottom
+
     .global     __vectors
     .global     disableHighVecs
     .global     enableGIC
@@ -120,48 +117,16 @@ _tx_initialize_low_level:
 	/* Save lr(entry mode) before mode switch*/
 	MOV		r12, lr
 
-    /* We must be in SVC mode at this point!  */
+    /* boot.S leaves us in SYS mode. Switch to SVC mode for ThreadX.
+       SYS mode has no SPSR, which breaks _tx_thread_schedule's
+       interrupt-return dispatch path.  */
+    MOV     r0, #SVC_MODE
+    MSR     CPSR_c, r0
 
-    /* Setup various stack pointers.  */
-
-    LDR     r1, =_sp                            // Get pointer to stack area
-
-#ifdef TX_ENABLE_IRQ_NESTING
-
-    /* Setup the system mode stack for nested interrupt support  */
-
-    LDR     r2, =SYS_STACK_SIZE                 // Pickup stack size
-    MOV     r3, #SYS_MODE                       // Build SYS mode CPSR
-    MSR     CPSR_c, r3                          // Enter SYS mode
-    SUB     r1, r1, #1                          // Backup 1 byte
-    BIC     r1, r1, #7                          // Ensure 8-byte alignment
-    MOV     sp, r1                              // Setup SYS stack pointer
-    SUB     r1, r1, r2                          // Calculate start of next stack
-#endif
-
-    LDR     r2, =FIQ_STACK_SIZE                 // Pickup stack size
-    MOV     r0, #FIQ_MODE                       // Build FIQ mode CPSR
-    MSR     CPSR, r0                            // Enter FIQ mode
-    SUB     r1, r1, #1                          // Backup 1 byte
-    BIC     r1, r1, #7                          // Ensure 8-byte alignment
-    MOV     sp, r1                              // Setup FIQ stack pointer
-    SUB     r1, r1, r2                          // Calculate start of next stack
-    LDR     r2, =IRQ_STACK_SIZE                 // Pickup IRQ stack size
-    MOV     r0, #IRQ_MODE                       // Build IRQ mode CPSR
-    MSR     CPSR, r0                            // Enter IRQ mode
-    SUB     r1, r1, #1                          // Backup 1 byte
-    BIC     r1, r1, #7                          // Ensure 8-byte alignment
-    MOV     sp, r1                              // Setup IRQ stack pointer
-    SUB     r3, r1, r2                          // Calculate end of IRQ stack
-    MOV     r0, #SVC_MODE                       // Build SVC mode CPSR
-    MSR     CPSR, r0                            // Enter SVC mode
-    LDR     r2, =_stack_bottom                  // Pickup stack bottom
-    CMP     r3, r2                              // Compare the current stack end with the bottom
-_stack_error_loop:
-    BLT     _stack_error_loop                   // If the IRQ stack exceeds the stack bottom, just sit here!
-
-    LDR     r2, =_tx_thread_system_stack_ptr    // Pickup stack pointer
-    STR     r1, [r2]                            // Save the system stack
+    /* SVC sp was set to __supervisor_stack by boot.S and never modified.
+       Save it as the ThreadX system stack pointer.  */
+    LDR     r2, =_tx_thread_system_stack_ptr
+    STR     sp, [r2]
 
     LDR     r1, =_end                           // Get end of non-initialized RAM area
     LDR     r2, =_tx_initialize_unused_memory   // Pickup unused memory ptr address
