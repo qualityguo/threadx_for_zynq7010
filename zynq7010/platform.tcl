@@ -80,3 +80,4 @@ platform generate -domains standalone_ps7_cortexa9_0
 bsp reload
 platform clean
 platform generate
+platform generate

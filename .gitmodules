@@ -1,0 +1,3 @@
+[submodule "jtag_tool"]
+	path = jtag_tool
+	url = https://github.com/qualityguo/xilinx_jtag_tool.git
