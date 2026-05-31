@@ -94,7 +94,7 @@
     ```
 
   - ```c
-    // 栈分布-递减栈
+    // 栈分布-递减栈-ABT栈和FIQ栈不用关心
     高字节		CPU0的SYS栈(4KB)
     		  CPU1的SYS栈(4KB)
               CPU0的SVC栈(4KB)
@@ -133,6 +133,8 @@
     6. 中断结束 writeEOI
     7. 恢复上下文 _tx_thread_context_restore
     ```
+    
+    - 这里对于SGI中断没有任何处理，不过也不需要，因为恢复上下文的时候会进行任务调度，进而将任务移动到别的核上
 
 - 大改`tx_initialize_low_level.S`
 
@@ -156,163 +158,7 @@
     2. 扩充IRQ的栈为0x1000
     ```
 
-### 四、SDK配置
-
-- 加入头文件搜索路径：
-  - `ThreadX/Source/inc`
-  - `ThreadX/Port/`
-  - `./`
-  - `BSP/`
-  - `ThreadX/utility/execution_profile_kit`
-- 加入宏`TX_INCLUDE_USER_DEFINE_FILE`，加入`tx_user.h`
-- 加入宏`TX_ENABLE_EXECUTION_CHANGE_NOTIFY`，使能调试
-
-### 一、SMP和单核比较
-
-- 中断的处理：中断需要路由到特定核
-- 心跳定时器：每个核都需要一个定时器， 每个核都需要独立设置自己的时钟中断时间
-- SGI核间中断：（唤醒另一个核干活）
-  - 线程的移动，需要SGI通知
-  - 互斥量的唤醒，可能需要SGI通知
-- SMP的保护
-  - 原子操作：防止数据竞争
-  - 公平等待队列：使用环形FIFO管理获取互斥量的核，不会饿死
-  - 低功耗等待：WFE
-- 启动同步
-  - 核0等到核1被启动
-- 各自自己的栈
-
-### 二、参考示例（飞腾）
-
-- 调度器实体
-
-  - 单核环境下
-
-    - ```c
-      // 一个单独的执行线程指针和当前线程指针
-      _tx_thread_execute_ptr
-      _tx_thread_current_ptr
-      ```
-
-  - SMP环境下
-
-    - ```c
-      // 通过id的偏移访问
-      MRS    x20, TPIDR_EL1 						// ID
-      LDR     x1, =_tx_thread_execute_ptr 		// 基址
-      LDR     x0, [x1, x20, LSL #3]				// 偏移
-      ```
-
-- 启动过程
-
-  - 核0启动并进入main函数，然后进入函数`tx_kernel_init`
-  - 调用函数`_tx_thread_smp_low_level_initialize()`
-    - 遍历每个核
-      - 获得物理核ID
-      - 设置`tx_core_info`
-      - 唤醒从核
-      - WFE等待，`tx_core_info.flag == 1`
-      - 从核开始配置，设置向量表、栈空间、MMU初始化、GIC初始化等
-  - 内核初始化完成之后，所有从核进入调度
-
-- 核间通信
-
-  - SGI0中断
-
-- SMP自旋锁-基于LDAXR/STXR独占访问的自旋锁
-
-- SMP调度器的线程就绪位-解决多核同时竞争同一线程的问题
-
-- 从核同步机制，实现了从核与主核的同步
-
-- 栈空间-每个核都有自己独立的系统栈
-
-### 三、
-
-### 三、zynq7010应该如何启动双核
-
-- 首先需要确认的一点是，SMP版本其实是运行的一个程序，不会有两个文件
-
-- 但是Xilinx的BSP启动代码，根据一个宏对CPU0和CPU1产生两个文件，因此关键是需要重新设计汇编启动文件
-
-- 汇编启动文件介绍
-
-  - 中断向量表和链接脚本中的配置
-
-    - ```
-      // 链接脚本
-      ENTRY(_vector_table)				// 定义了中断向量表的符号
-      
-      // 汇编文件
-          .section .vectors, "ax"
-          .align 3
-      
-          .global _vector_table
-      _vector_table:
-          B       Reset_Handler
-          B       Undefined_Handler
-          B       SVC_Handler
-          B       Prefetch_Handler
-          B       Abort_Handler
-          B       .                         @; Reserved
-          B       IRQ_Handler
-          B       FIQ_Handler
-      ```
-
-  - 复位函数`Reset_Handler`做了什么（对于所有核的初始化-运行时判断）
-
-    - ```
-      // 第一步：进入SMP的一致域	joinSMP函数-	设置ACTLR寄存器的bit6置1，使能SMP
-      // 第二步：关闭Cache、MMU、分支预测	 设置SCTLR寄存器的bit12、bit2、bit0、bit11清零(I-Cache禁止、D-Cache禁止、MMU禁止、分支预测禁止)
-      // 第三步：读取CPU的ID到r0中
-      // 第四步：设置栈(IRQ的栈、SVC的栈、SYS的栈)
-      // 第五步：设置VBAR为中断向量表的地址
-      // 第六步：无效化Cache和TLB	invalidateCaches+清空分支预测+TLB
-      // 第七步：设置所有域为Client模式
-      // 第八步：设置页表的基址，写入TTBR0
-      // 第九步：使能MMU
-      // 第十步：使能VFP
-      // 第十一步：清除释放从核标志位为0，_tx_thread_smp_release_cores_flag
-      // 第十一步：启动跳转，CPU0跳转到primaryCPUInit，CPU1跳转到secondaryCPUsInit
-      ```
-
-    - ```
-      // 栈分布-慢递减栈
-      高字节		CPU0的SYS栈(16KB)
-      		  CPU1的SYS栈(16KB)
-                CPU0的SVC栈(4KB)
-      		  CPU1的SVC栈(4KB)
-      		  CPU0的IRQ栈(2KB)
-      		  CPU1的IRQ栈(2KB)
-      ```
-
-  - CPU0启动函数
-
-    - 初始化SCU
-    - 初始化L2Cache
-    - 初始化GIC
-    - 初始化私有定时器
-    - 初始化SGI
-    - 配置Cache和分支预测
-    - 启动CPU1
-    - 跳转`start`函数
-
-  - CPU1的启动函数
-
-    - 使能GIC-CPU接口
-    - 设置优先级掩码
-    - 使能SGI
-    - 使能Cache
-    - 跳转`_tx_thread_smp_initialize_wait`函数
-
-### 四、相关修改
-
-- 修改`startup.S`
-- 修改`lscript.ld`
-- SDK配置
-  - 加入符号`TX_INCLUDE_USER_DEFINE_FILE`
-
-- 源代码bug修改
+- 源码bug修改
 
   - ```c
     // tx_execution_profile.c
@@ -326,7 +172,17 @@
     total_time[core] =  _tx_execution_idle_time_total[core];
     ```
 
-  - 
+
+### 四、SDK配置
+
+- 加入头文件搜索路径：
+  - `ThreadX/Source/inc`
+  - `ThreadX/Port/`
+  - `./`
+  - `BSP/`
+  - `ThreadX/utility/execution_profile_kit`
+- 加入宏`TX_INCLUDE_USER_DEFINE_FILE`，加入`tx_user.h`
+- 加入宏`TX_ENABLE_EXECUTION_CHANGE_NOTIFY`，使能调试
 
 ## 第二章：SMP-API使用
 

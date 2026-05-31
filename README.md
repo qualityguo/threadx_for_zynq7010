@@ -7,6 +7,7 @@
 > | 静态库工程 | 源码目录 | 应用工程 |
 > |-----------|---------|---------|
 > | `ThreadX_system` | `ThreadX/` | `hello_threadx`, `hello_filex`, `hello_netxduo` |
+> | `ThreadX_system`（SMP） | `ThreadX/` | `hello_threadx_smp` |
 > | `FileX_system` | `FileX/` | `hello_filex` |
 > | `NetXDuo_system` | `NetXDuo/` | `hello_netxduo` |
 
@@ -163,4 +164,66 @@ hello_netxduo/src/
 - KEY0 按下显示任务信息（含 CPU 使用率、栈使用情况）
 - NetX 网络任务：初始化协议栈（ARP、TCP、UDP、ICMP），运行网络示例
 
-### 第五章：USBX（待补充）
+### 第五章：多核SMP移植
+
+将 ThreadX SMP（v6.4.1）多核对称多处理移植到 Zynq7010 双核 Cortex-A9 平台，实现双核并行任务调度。应用工程为 `hello_threadx_smp`。
+
+目录结构：
+
+```
+hello_threadx_smp/src/
+├── BSP/                  # 板级支持包（同单核版本）
+│   └── driver/           # 设备驱动框架及外设驱动
+│       ├── device_core   # 统一设备驱动框架
+│       ├── led_driver    # LED 驱动
+│       ├── key_driver    # 按键驱动（中断模式）
+│       ├── uart_driver   # UART 串口驱动
+│       └── sd_driver     # SD 卡驱动
+├── ThreadX/
+│   ├── Source/           # ThreadX SMP 内核源码（common_smp）
+│   ├── Port/             # Cortex-A9 SMP 移植层
+│   │   ├── startup.S            # 启动汇编（双核引导、SCU/L2Cache/GIC 初始化）
+│   │   ├── tx_initialize_low_level.S  # 底层初始化（GIC、SGI 配置）
+│   │   └── ...                   # 上下文切换、中断处理等
+│   ├── utility/          # 辅助工具（SMP 版性能分析）
+│   ├── tx_port.h         # SMP 移植配置（双核、GTC 时钟源）
+│   └── tx_user.h         # ThreadX 用户配置
+├── utils/                # 通用工具（打印、环形缓冲区等）
+├── main.c                # 任务创建与双核亲和性配置
+├── lscript.ld            # 链接脚本（扩充 SVC/IRQ 栈）
+└── includes.h            # 头文件汇总
+```
+
+移植要点：
+
+- **SMP 内核源码**：使用 `common_smp` 替代单核 `common`，移植层使用 `ports_smp/cortex_a9_smp/gnu`
+- **启动流程**（`startup.S`）：CPU0 初始化 SCU、L2Cache 后启动 CPU1（写 `_vector_table` 到 `0xFFFFFFF0` + SEV），CPU1 使能 GIC 接口后自旋等待 CPU0 释放
+- **时钟源**：使用 GTC（Global Timer Counter）替代私有定时器作为 SMP 时间基准
+- **中断处理**（`IRQ_Handler`）：通过 GIC 中断 ID 分发，ID 29 为私有定时器中断，其余走 `tx_irq_dispatch`
+- **栈布局**：每个核独立的 SVC 栈（4KB）、IRQ 栈（2KB）、SYS 栈（4KB）
+- **源码修正**：`tx_execution_profile.c` 中数组赋值语法修正
+
+SMP 专属 API：
+
+| API | 描述 |
+|-----|------|
+| `tx_thread_smp_core_get` | 获得当前运行的核 ID |
+| `tx_thread_smp_core_exclude` | 设置指定线程不能在哪些核上运行 |
+| `tx_thread_smp_core_exclude_get` | 获取指定线程的核心排除掩码 |
+| `tx_timer_smp_core_exclude` | 设置系统定时器不能在哪些核心上触发 |
+| `tx_timer_smp_core_exclude_get` | 获得系统定时器的核心排除掩码 |
+
+任务介绍：
+
+- CPU0 运行：LED0 闪烁（周期 2s）、消息队列接收、信号量接收、启动任务（CPU 使用率统计）
+- CPU1 运行：KEY 按键处理（事件标志组）、UART1 接收任务（中断回显）
+- 软件定时器控制 LED1 闪烁（周期 1s）
+- KEY0 按下显示双核各任务信息（含每核 CPU 使用率、执行时间、栈使用情况）
+
+详细文档：
+
+- [多核SMP移植](docs/多核SMP移植.md) — SMP 移植步骤、启动流程、代码修改说明、API 使用
+
+### 第六章：USBX（待补充）
+
+### 第七章：GUIX（待补充）

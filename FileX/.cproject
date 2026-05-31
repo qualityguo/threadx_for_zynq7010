@@ -69,6 +69,12 @@
                                     								
                                 </option>
                                 								
+                                <option id="xilinx.gnu.compiler.inferred.swplatform.includes.1584825933" superClass="xilinx.gnu.compiler.inferred.swplatform.includes" valueType="includePath">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspInclude}"/>
+                                    								
+                                </option>
+                                								
                                 <inputType id="xilinx.gnu.armv7.c.compiler.input.1489073535" name="C source files" superClass="xilinx.gnu.armv7.c.compiler.input"/>
                                 							
                             </tool>
@@ -78,14 +84,48 @@
                                 <option defaultValue="gnu.c.optimization.level.none" id="xilinx.gnu.compiler.option.optimization.level.1255930694" name="Optimization Level" superClass="xilinx.gnu.compiler.option.optimization.level" valueType="enumerated"/>
                                 								
                                 <option id="xilinx.gnu.compiler.option.debugging.level.514394820" name="Debug Level" superClass="xilinx.gnu.compiler.option.debugging.level" useByScannerDiscovery="false" value="gnu.c.debugging.level.max" valueType="enumerated"/>
+                                								
+                                <option id="xilinx.gnu.compiler.inferred.swplatform.includes.1860464008" superClass="xilinx.gnu.compiler.inferred.swplatform.includes" valueType="includePath">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspInclude}"/>
+                                    								
+                                </option>
                                 							
                             </tool>
                             							
                             <tool id="xilinx.gnu.armv7.toolchain.archiver.staticlib.debug.1392367427" name="ARM v7 archiver" superClass="xilinx.gnu.armv7.toolchain.archiver.staticlib.debug"/>
                             							
-                            <tool id="xilinx.gnu.armv7.c.toolchain.linker.880929202" name="ARM v7 gcc linker" superClass="xilinx.gnu.armv7.c.toolchain.linker"/>
+                            <tool id="xilinx.gnu.armv7.c.toolchain.linker.880929202" name="ARM v7 gcc linker" superClass="xilinx.gnu.armv7.c.toolchain.linker">
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.lpath.2134996837" superClass="xilinx.gnu.linker.inferred.swplatform.lpath" valueType="libPaths">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspLib}"/>
+                                    								
+                                </option>
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.flags.5466170" superClass="xilinx.gnu.linker.inferred.swplatform.flags" valueType="libs">
+                                    									
+                                    <listOptionValue builtIn="false" value="-Wl,--start-group,-lxil,-lgcc,-lc,--end-group"/>
+                                    								
+                                </option>
+                                							
+                            </tool>
                             							
-                            <tool id="xilinx.gnu.armv7.cxx.toolchain.linker.1214706432" name="ARM v7 g++ linker" superClass="xilinx.gnu.armv7.cxx.toolchain.linker"/>
+                            <tool id="xilinx.gnu.armv7.cxx.toolchain.linker.1214706432" name="ARM v7 g++ linker" superClass="xilinx.gnu.armv7.cxx.toolchain.linker">
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.lpath.1096172701" superClass="xilinx.gnu.linker.inferred.swplatform.lpath" valueType="libPaths">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspLib}"/>
+                                    								
+                                </option>
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.flags.621162456" superClass="xilinx.gnu.linker.inferred.swplatform.flags" valueType="libs">
+                                    									
+                                    <listOptionValue builtIn="false" value="-Wl,--start-group,-lxil,-lgcc,-lc,--end-group"/>
+                                    								
+                                </option>
+                                							
+                            </tool>
                             						
                         </toolChain>
                         					
@@ -147,6 +187,12 @@
                                 								
                                 <option id="xilinx.gnu.compiler.misc.other.1188744517" name="Other flags" superClass="xilinx.gnu.compiler.misc.other" value="-c -fmessage-length=0 -MT&quot;$@&quot; -mcpu=cortex-a9 -mfpu=vfpv3 -mfloat-abi=hard" valueType="string"/>
                                 								
+                                <option id="xilinx.gnu.compiler.inferred.swplatform.includes.1154294475" superClass="xilinx.gnu.compiler.inferred.swplatform.includes" valueType="includePath">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspInclude}"/>
+                                    								
+                                </option>
+                                								
                                 <inputType id="xilinx.gnu.armv7.c.compiler.input.1676741818" name="C source files" superClass="xilinx.gnu.armv7.c.compiler.input"/>
                                 							
                             </tool>
@@ -156,14 +202,48 @@
                                 <option defaultValue="gnu.c.optimization.level.more" id="xilinx.gnu.compiler.option.optimization.level.474919172" name="Optimization Level" superClass="xilinx.gnu.compiler.option.optimization.level" valueType="enumerated"/>
                                 								
                                 <option id="xilinx.gnu.compiler.option.debugging.level.955797256" name="Debug Level" superClass="xilinx.gnu.compiler.option.debugging.level" useByScannerDiscovery="false" value="gnu.c.debugging.level.none" valueType="enumerated"/>
+                                								
+                                <option id="xilinx.gnu.compiler.inferred.swplatform.includes.654540314" superClass="xilinx.gnu.compiler.inferred.swplatform.includes" valueType="includePath">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspInclude}"/>
+                                    								
+                                </option>
                                 							
                             </tool>
                             							
                             <tool id="xilinx.gnu.armv7.toolchain.archiver.statclib.release.1232900386" name="ARM v7 archiver" superClass="xilinx.gnu.armv7.toolchain.archiver.statclib.release"/>
                             							
-                            <tool id="xilinx.gnu.armv7.c.toolchain.linker.960039457" name="ARM v7 gcc linker" superClass="xilinx.gnu.armv7.c.toolchain.linker"/>
+                            <tool id="xilinx.gnu.armv7.c.toolchain.linker.960039457" name="ARM v7 gcc linker" superClass="xilinx.gnu.armv7.c.toolchain.linker">
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.lpath.142164284" superClass="xilinx.gnu.linker.inferred.swplatform.lpath" valueType="libPaths">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspLib}"/>
+                                    								
+                                </option>
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.flags.1686808154" superClass="xilinx.gnu.linker.inferred.swplatform.flags" valueType="libs">
+                                    									
+                                    <listOptionValue builtIn="false" value="-Wl,--start-group,-lxil,-lgcc,-lc,--end-group"/>
+                                    								
+                                </option>
+                                							
+                            </tool>
                             							
-                            <tool id="xilinx.gnu.armv7.cxx.toolchain.linker.585101745" name="ARM v7 g++ linker" superClass="xilinx.gnu.armv7.cxx.toolchain.linker"/>
+                            <tool id="xilinx.gnu.armv7.cxx.toolchain.linker.585101745" name="ARM v7 g++ linker" superClass="xilinx.gnu.armv7.cxx.toolchain.linker">
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.lpath.1000072985" superClass="xilinx.gnu.linker.inferred.swplatform.lpath" valueType="libPaths">
+                                    									
+                                    <listOptionValue builtIn="false" value="${resolvePlatformFile:project=FileX,fileType=bspLib}"/>
+                                    								
+                                </option>
+                                								
+                                <option id="xilinx.gnu.linker.inferred.swplatform.flags.1036295887" superClass="xilinx.gnu.linker.inferred.swplatform.flags" valueType="libs">
+                                    									
+                                    <listOptionValue builtIn="false" value="-Wl,--start-group,-lxil,-lgcc,-lc,--end-group"/>
+                                    								
+                                </option>
+                                							
+                            </tool>
                             						
                         </toolChain>
                         					
