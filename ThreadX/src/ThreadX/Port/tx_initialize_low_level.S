@@ -24,10 +24,10 @@
 
     .arm
 
-SVC_MODE        =       0xD3                    // Disable IRQ/FIQ SVC mode
-IRQ_MODE        =       0xD2                    // Disable IRQ/FIQ IRQ mode
-FIQ_MODE        =       0xD1                    // Disable IRQ/FIQ FIQ mode
-SYS_MODE        =       0xDF                    // Disable IRQ/FIQ SYS mode
+SVC_MODE        =       0xD3
+IRQ_MODE        =       0xD2
+FIQ_MODE        =       0xD1
+SYS_MODE        =       0xDF
 
 
     .global     _tx_thread_system_stack_ptr
@@ -39,14 +39,7 @@ SYS_MODE        =       0xDF                    // Disable IRQ/FIQ SYS mode
 
     .global     __vectors
     .global     disableHighVecs
-    .global     enableGIC
-    .global     enableGICProcessorInterface
-    .global     enableCaches
-    .global     init_private_timer
-    .global     start_private_timer
     .global		tx_irq_dispatch
-/* Define the 16-bit Thumb mode veneer for _tx_initialize_low_level for
-   applications calling this function from to 16-bit Thumb mode.  */
 
     .text
     .align 2
@@ -54,286 +47,126 @@ SYS_MODE        =       0xDF                    // Disable IRQ/FIQ SYS mode
     .global $_tx_initialize_low_level
     .type   $_tx_initialize_low_level,function
 $_tx_initialize_low_level:
-     BX        pc                               // Switch to 32-bit mode
-     NOP                                        //
+     BX        pc
+     NOP
     .arm
-     STMFD     sp!, {lr}                        // Save return address
-     BL        _tx_initialize_low_level         // Call _tx_initialize_low_level function
-     LDMFD     sp!, {lr}                        // Recover saved return address
-     BX        lr                               // Return to 16-bit caller
+     STMFD     sp!, {lr}
+     BL        _tx_initialize_low_level
+     LDMFD     sp!, {lr}
+     BX        lr
 
     .text
     .align 2
-/**************************************************************************/
-/*                                                                        */
-/*  FUNCTION                                               RELEASE        */
-/*                                                                        */
-/*    _tx_initialize_low_level                             ARMv7-A        */
-/*                                                           6.3.0        */
-/*  AUTHOR                                                                */
-/*                                                                        */
-/*    William E. Lamie, Microsoft Corporation                             */
-/*                                                                        */
-/*  DESCRIPTION                                                           */
-/*                                                                        */
-/*    This function is responsible for any low-level processor            */
-/*    initialization, including setting up interrupt vectors, setting     */
-/*    up a periodic timer interrupt source, saving the system stack       */
-/*    pointer for use in ISR processing later, and finding the first      */
-/*    available RAM memory address for tx_application_define.             */
-/*                                                                        */
-/*  INPUT                                                                 */
-/*                                                                        */
-/*    None                                                                */
-/*                                                                        */
-/*  OUTPUT                                                                */
-/*                                                                        */
-/*    None                                                                */
-/*                                                                        */
-/*  CALLS                                                                 */
-/*                                                                        */
-/*    None                                                                */
-/*                                                                        */
-/*  CALLED BY                                                             */
-/*                                                                        */
-/*    _tx_initialize_kernel_enter           ThreadX entry function        */
-/*                                                                        */
-/*  RELEASE HISTORY                                                       */
-/*                                                                        */
-/*    DATE              NAME                      DESCRIPTION             */
-/*                                                                        */
-/*  09-30-2020     William E. Lamie         Initial Version 6.1           */
-/*  04-25-2022     Zhen Kong                Updated comments,             */
-/*                                            resulting in version 6.1.11 */
-/*  10-31-2023     Tiejun Zhou              Modified comment(s), added    */
-/*                                            #include tx_user.h,         */
-/*                                            resulting in version 6.3.0  */
-/*                                                                        */
-/**************************************************************************/
     .global _tx_initialize_low_level
     .type   _tx_initialize_low_level,function
 _tx_initialize_low_level:
 
-	/* Save lr(entry mode) before mode switch*/
-	MOV		r12, lr
+	MOV		r12, lr                     // save lr before mode switch
 
-    /* boot.S leaves us in SYS mode. Switch to SVC mode for ThreadX.
-       SYS mode has no SPSR, which breaks _tx_thread_schedule's
-       interrupt-return dispatch path.  */
+    // Switch SYS -> SVC (SYS has no SPSR)
     MOV     r0, #SVC_MODE
     MSR     CPSR_c, r0
 
-    /* SVC sp was set to __supervisor_stack by boot.S and never modified.
-       Save it as the ThreadX system stack pointer.  */
+    // Save SVC sp as ThreadX system stack
     LDR     r2, =_tx_thread_system_stack_ptr
     STR     sp, [r2]
 
-    LDR     r1, =_end                           // Get end of non-initialized RAM area
-    LDR     r2, =_tx_initialize_unused_memory   // Pickup unused memory ptr address
-    ADD     r1, r1, #8                          // Increment to next free word
-    STR     r1, [r2]                            // Save first free memory address
+    // Save unused memory pointer (_end + 8)
+    LDR     r1, =_end
+    LDR     r2, =_tx_initialize_unused_memory
+    ADD     r1, r1, #8
+    STR     r1, [r2]
 
-    //PUSH    {lr}
-    PUSH	{r12}								// Push saved return address(in r12)
+    PUSH	{r12}                       // push saved lr
 
-    /* Setup the vector table.  */
-    LDR     r0, =__vectors                      // Get address of vector table
-    MCR     p15, 0, r0, c12, c0, 0              // Write vector table address to CP15
-    BL      disableHighVecs                     // Disable high vectors
+    // Set VBAR to ThreadX vector table
+    LDR     r0, =__vectors
+    MCR     p15, 0, r0, c12, c0, 0
+    BL      disableHighVecs
 
-    //
-    // GIC Init
-    // ---------
-    BL      enableGIC
-    BL      enableGICProcessorInterface
-
-    //
-    // Enable Private Timer for periodic IRQ
-    // --------------------------------------
-    MOV     r0, #0xF0
-    BL      setPriorityMask               // Set priority mask (local)
-
-    // [EL] Change start - don't enable interrupts here!  
-    //CPSIE   i                            // Clear CPSR I bit
-    // [EL] Change end
-
-    // Enable the Private Timer Interrupt Source
-    MOV     r0, #29
-    MOV     r1, #0
-    BL      enableIntID
-
-    // Set the priority
-    MOV     r0, #29
-    MOV     r1, #0
-    BL      setIntPriority
-
-    // Configure Timer
-    //MOV     r0, #0xF0000
-    LDR 	r0, =3333333					// fix tick value
-    MOV     r1, #0x0
-    BL      init_private_timer
-    BL      start_private_timer
-  
-    //
-    // Enable receipt of SGI 0
-    // ------------------------
-    MOV     r0, #0x0                  // ID
-    BL      enableIntID
-
-    // Set the priority
-    MOV     r0, #0x0                  // ID
-    MOV     r1, #0x0                  // Priority
-    BL      setIntPriority
+    // GIC / Timer init has been moved to bsp_init()
 
     POP    {lr}
 #ifdef __THUMB_INTERWORK
-    BX      lr                                  // Return to caller
+    BX      lr
 #else
-    MOV     pc, lr                              // Return to caller
+    MOV     pc, lr
 #endif
-
-/* Define shells for each of the interrupt vectors.  */
 
     .global __tx_undefined
 __tx_undefined:
-    B       __tx_undefined                      // Undefined handler
+    B       __tx_undefined
 
     .global __tx_swi_interrupt
 __tx_swi_interrupt:
-    B       __tx_swi_interrupt                  // Software interrupt handler
+    B       __tx_swi_interrupt
 
     .global __tx_prefetch_handler
 __tx_prefetch_handler:
-    B       __tx_prefetch_handler               // Prefetch exception handler
+    B       __tx_prefetch_handler
 
     .global __tx_abort_handler
 __tx_abort_handler:
-    B       __tx_abort_handler                  // Abort exception handler
+    B       __tx_abort_handler
 
     .global __tx_reserved_handler
 __tx_reserved_handler:
-    B       __tx_reserved_handler               // Reserved exception handler
+    B       __tx_reserved_handler
 
+// ============================================================
+// IRQ Handler
+// ============================================================
     .global __tx_irq_handler
     .global __tx_irq_processing_return
 __tx_irq_handler:
-
-    /* Jump to context save to save system context.  */
     B       _tx_thread_context_save
 __tx_irq_processing_return:
-//
-    /* At this point execution is still in the IRQ mode.  The CPSR, point of
-       interrupt, and all C scratch registers are available for use.  In
-       addition, IRQ interrupts may be re-enabled - with certain restrictions -
-       if nested IRQ interrupts are desired.  Interrupts may be re-enabled over
-       small code sequences where lr is saved before enabling interrupts and
-       restored after interrupts are again disabled.  */
-    
-    PUSH    {r4, r5}            // Save some preserved registers (r5 is saved just for 8-byte alignment)
+
+    PUSH    {r4, r5}                    // r5 for 8-byte alignment
     BL      readIntAck
     MOV     r4, r0
 
-    CMP     r0, #29             // If not Private Timer interrupt (ID 29), by pass
+    CMP     r0, #29                     // Private Timer?
     BNE     by_pass_timer_interrupt
 
     BL      clear_private_timer_irq
     DSB
-
-    /* For debug purpose, execute the timer interrupt processing here.  In
-       a real system, some kind of status indication would have to be checked
-       before the timer interrupt handler could be called.  */
-
-    BL     _tx_timer_interrupt                  // Timer interrupt handler
-    B	   after_irq_dispatch					// skip tx_irq_dispatch for timer
+    BL     _tx_timer_interrupt
+    B	   after_irq_dispatch
 
 by_pass_timer_interrupt:
     MOV     r0, r4
-    BL		tx_irq_dispatch						// dispatch
+    BL		tx_irq_dispatch
 
 after_irq_dispatch:
     MOV		r0, r4
     BL      writeEOI
-    POP     {r4, r5}                            // Recover preserved registers
-
-    /* Jump to context restore to restore system context.  */
+    POP     {r4, r5}
     B       _tx_thread_context_restore
-
-
-    /* This is an example of a vectored IRQ handler.  */
-
-
-
-    /* Save initial context and call context save to prepare for
-       vectored ISR execution.  */
-
-    /* At this point execution is still in the IRQ mode.  The CPSR, point of
-       interrupt, and all C scratch registers are available for use.  In
-       addition, IRQ interrupts may be re-enabled - with certain restrictions -
-       if nested IRQ interrupts are desired.  Interrupts may be re-enabled over
-       small code sequences where lr is saved before enabling interrupts and
-       restored after interrupts are again disabled.  */
-
-
-    /* Interrupt nesting is allowed after calling _tx_thread_irq_nesting_start
-       from IRQ mode with interrupts disabled.  This routine switches to the
-       system mode and returns with IRQ interrupts enabled.
-
-       NOTE:  It is very important to ensure all IRQ interrupts are cleared
-       prior to enabling nested IRQ interrupts.  */
-
-    /* Application IRQ handlers can be called here!  */
-
-    /* If interrupt nesting was started earlier, the end of interrupt nesting
-       service must be called before returning to _tx_thread_context_restore.
-       This routine returns in processing in IRQ mode with interrupts disabled.  */
-
 
 
 #ifdef TX_ENABLE_FIQ_SUPPORT
     .global  __tx_fiq_handler
     .global  __tx_fiq_processing_return
 __tx_fiq_handler:
-
-    /* Jump to fiq context save to save system context.  */
     B       _tx_thread_fiq_context_save
 __tx_fiq_processing_return:
-
-    /* At this point execution is still in the FIQ mode.  The CPSR, point of
-       interrupt, and all C scratch registers are available for use.  */
-
-    /* Interrupt nesting is allowed after calling _tx_thread_fiq_nesting_start
-       from FIQ mode with interrupts disabled.  This routine switches to the
-       system mode and returns with FIQ interrupts enabled.
-
-       NOTE:  It is very important to ensure all FIQ interrupts are cleared
-       prior to enabling nested FIQ interrupts.  */
 #ifdef TX_ENABLE_FIQ_NESTING
     BL      _tx_thread_fiq_nesting_start
 #endif
-
-    /* Application FIQ handlers can be called here!  */
-
-    /* If interrupt nesting was started earlier, the end of interrupt nesting
-       service must be called before returning to _tx_thread_fiq_context_restore.  */
 #ifdef TX_ENABLE_FIQ_NESTING
     BL      _tx_thread_fiq_nesting_end
 #endif
-
-    /* Jump to fiq context restore to restore system context.  */
     B       _tx_thread_fiq_context_restore
-
 
 #else
     .global  __tx_fiq_handler
 __tx_fiq_handler:
-    B       __tx_fiq_handler                    // FIQ interrupt handler
+    B       __tx_fiq_handler
 #endif
 
 
 BUILD_OPTIONS:
-    .word  _tx_build_options                    // Reference to bring in
+    .word  _tx_build_options
 VERSION_ID:
-    .word  _tx_version_id                       // Reference to bring in
-
-
-
+    .word  _tx_version_id

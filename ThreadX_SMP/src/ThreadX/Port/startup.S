@@ -1,17 +1,6 @@
-@; ------------------------------------------------------------
-@; Cortex-A9 MPCore SMP Startup for Zynq 7010
-@;
-@; Based on: ARM Cortex-A15 MPCore SMP Prime Number Generator Example
-@; Copyright (c) 2011-2012 ARM Ltd.  All rights reserved.
-@; Adapted for Xilinx Zynq-7010 (Cortex-A9 dual-core) with ThreadX SMP.
-@; ------------------------------------------------------------
-@
-@    PRESERVE8
-@
-@  AREA  StartUp,CODE,READONLY
-@
-@; Standard definitions of mode bits and interrupt (I&F) flags in PSRs
-@
+// Cortex-A9 MPCore SMP Startup for Zynq 7010
+// Adapted for Xilinx Zynq-7010 dual-core with ThreadX SMP.
+
 Mode_USR          =     0x10
 Mode_FIQ          =     0x11
 Mode_IRQ          =     0x12
@@ -20,8 +9,8 @@ Mode_ABT          =     0x17
 Mode_UNDEF        =     0x1B
 Mode_SYS          =     0x1F
 
-I_Bit             =     0x80 @ when I bit is set, IRQ is disabled
-F_Bit             =     0x40 @ when F bit is set, FIQ is disabled
+I_Bit             =     0x80
+F_Bit             =     0x40
 
 SYS_MODE        =     0xDF
 SVC_MODE        =     0xD3
@@ -29,13 +18,9 @@ IRQ_MODE        =     0xD2
 ABT_MODE        =     0xD7
 FIQ_MODE        =     0xD1
 
-@; ------------------------------------------------------------
-@; Zynq 7010 specific constants
-@; ------------------------------------------------------------
-@
-VFPEnable       =       0x40000000              @ VFP enable value
+VFPEnable       =       0x40000000
 
-@; L2 Cache Controller (PL310) offsets from 0xF8F02000
+// L2 Cache Controller (PL310)
 L2CC_BASE                =     0xF8F02000
 L2CCControl              =     (L2CC_BASE + 0x0100)
 L2CCAuxControl           =     (L2CC_BASE + 0x0104)
@@ -46,13 +31,12 @@ L2CCSync                 =     (L2CC_BASE + 0x0730)
 L2CCIntRaw               =     (L2CC_BASE + 0x021C)
 L2CCIntClear             =     (L2CC_BASE + 0x0220)
 
-@; L2 configuration values (from Xilinx BSP)
 L2CCAuxControlVal        =     0x72360000
 L2CCControlVal           =     0x01
 L2CCTAGLatency           =     0x0111
 L2CCDataLatency          =     0x0121
 
-@; SLCR registers
+// SLCR registers
 SLCRBase                 =     0xF8000000
 SLCRUnlockReg            =     (SLCRBase + 0x08)
 SLCRUnlockKey            =     0xDF0D
@@ -61,35 +45,21 @@ SLCRlockKey              =     0x767B
 SLCRL2cRamReg            =     (SLCRBase + 0xA1C)
 SLCRL2cRamConfig         =     0x00020202
 
-@; CPU1 start address (OCM location per Zynq TRM)
 CPU1_START_ADDR          =     0xFFFFFFF0
 
-@; Per-core stack slice sizes (must match linker script lscript.ld)
-@;   SYS:  0x2000 total (only used during early boot mode-switching)
-@;   IRQ:  0x1000 total = 2 * 0x800    SVC:  0x2000 total = 2 * 0x1000
-@;   ABORT/FIQ/UNDEF: single-core sizes (exception debug only)
-SYS_STACK_PER_CORE       =     0x1000
-IRQ_STACK_PER_CORE       =     0x0800
-SVC_STACK_PER_CORE       =     0x1000
+// Per-core stack offsets: total_size / num_cores (from linker script symbols)
 
-@; ------------------------------------------------------------
-@; Porting defines - L1 page table descriptor templates
-@; ------------------------------------------------------------
-@
-L1_COHERENT       =     0x00014c06  @ Template descriptor for coherent memory
-L1_NONCOHERENT    =     0x00000c1e  @ Template descriptor for non-coherent memory
-L1_DEVICE         =     0x00000c06  @ Template descriptor for device memory
+L1_COHERENT       =     0x00014c06
+L1_NONCOHERENT    =     0x00000c1e
+L1_DEVICE         =     0x00000c06
 
 .section  .vectors, "ax"
 .align 3
 .cfi_sections .debug_frame
 
-@; ------------------------------------------------------------
-@; Vector Table
-@; ------------------------------------------------------------
-@
-@  ENTRY
-@
+// ============================================================
+// Vector Table
+// ============================================================
     .global _vector_table
 _vector_table:
   B      Reset_Handler
@@ -97,14 +67,10 @@ _vector_table:
   B      SVC_Handler
   B      Prefetch_Handler
   B      Abort_Handler
-  B      .                         @ Reserved (no Hypervisor on Cortex-A9)
+  B      .
   B      IRQ_Handler
   B      FIQ_Handler
 
-@; ------------------------------------------------------------
-@; Handlers for unused exceptions
-@; ------------------------------------------------------------
-@
 Undefined_Handler:
   B       Undefined_Handler
 SVC_Handler:
@@ -116,9 +82,9 @@ Abort_Handler:
 FIQ_Handler:
   B       FIQ_Handler
 
-@; ------------------------------------------------------------
-@; Imports
-@; ------------------------------------------------------------
+// ============================================================
+// Imports
+// ============================================================
   .global   readIntAck
   .global   writeEOI
   .global   enableGIC
@@ -127,34 +93,27 @@ FIQ_Handler:
   .global   enableIntID
   .global   setIntPriority
   .global   joinSMP
-
   .global   invalidateCaches
   .global   disableHighVecs
   .global   _start
-
   .global   _tx_thread_smp_initialize_wait
   .global   _tx_thread_smp_release_cores_flag
   .global   _tx_thread_context_save
   .global   _tx_thread_context_restore
   .global   _tx_timer_interrupt
   .global   _tx_thread_smp_inter_core_interrupts
-
   .global   enableBranchPrediction
   .global   enableCaches
-
   .global   enableSCU
   .global   enableMaintenanceBroadcast
   .global   secureSCUInvalidate
-
   .global   clear_private_timer_irq
   .global   tx_irq_dispatch
-
   .global   MMUTable
 
-@; ------------------------------------------------------------
-@; IRQ Handler (ThreadX-aware)
-@; ------------------------------------------------------------
-@
+// ============================================================
+// IRQ Handler
+// ============================================================
   .section .text, "ax"
   .align 2
   .global IRQ_Handler
@@ -163,270 +122,206 @@ IRQ_Handler:
   .global __tx_irq_processing_return
   B       _tx_thread_context_save
 __tx_irq_processing_return:
-  PUSH    {r4, r5}            @ Save preserved registers (r5 for 8-byte alignment)
+  PUSH    {r4, r5}                    // r5 for 8-byte alignment
 
-  @ Acknowledge the interrupt
-  BL      readIntAck
+  BL      readIntAck                   // get interrupt ID
   MOV     r4, r0
 
-  @ Check if Private Timer interrupt (ID 29)
-  CMP     r0, #29                      @ Private Timer PPI ID
+  CMP     r0, #29                     // Private Timer?
   BNE     irq_check_sgi
 
-  @ Clear timer interrupt and call ThreadX timer ISR
   BL      clear_private_timer_irq
   DSB
   BL      _tx_timer_interrupt
   B       irq_done
 
 irq_check_sgi:
-  @ Dispatch other interrupts (SGI, shared peripherals) via Xilinx GIC
-  MOV     r0, r4
+  MOV     r0, r4                      // dispatch via XScuGic HandlerTable
   BL      tx_irq_dispatch
 
 irq_done:
-  @ Write end of interrupt reg
   MOV     r0, r4
   BL      writeEOI
-
-  @ Jump to context restore to restore system context
   POP     {r4, r5}
   B       _tx_thread_context_restore
 
 
-@; ------------------------------------------------------------
-@; Reset Handler - Generic initialization, run by all CPUs
-@; ------------------------------------------------------------
-@
+// ============================================================
+// Reset Handler (all CPUs enter here)
+// ============================================================
   .align 2
   .global Reset_Handler
   .type   Reset_Handler,function
 Reset_Handler:
 
-@  ;
-@  ; Set ACTLR.SMP bit
-@  ; ------------------
-  BL      joinSMP
+  BL      joinSMP                     // set ACTLR.SMP bit
 
-@;
-@; Disable caches, MMU and branch prediction in case they were left enabled from an earlier run
-@; This does not need to be done from a cold reset
-@; ------------------------------------------------------------
-  MRC     p15, 0, r0, c1, c0, 0       @ Read CP15 System Control register
-  BIC     r0, r0, #(0x1 << 12)        @ Clear I bit 12 to disable I Cache
-  BIC     r0, r0, #(0x1 <<  2)        @ Clear C bit  2 to disable D Cache
-  BIC     r0, r0, #0x1                @ Clear M bit  0 to disable MMU
-  BIC     r0, r0, #(0x1 << 11)        @ Clear Z bit 11 to disable branch prediction
-  MCR     p15, 0, r0, c1, c0, 0       @ Write CP15 System Control register
+  // Disable caches, MMU, branch prediction
+  MRC     p15, 0, r0, c1, c0, 0
+  BIC     r0, r0, #(0x1 << 12)
+  BIC     r0, r0, #(0x1 <<  2)
+  BIC     r0, r0, #0x1
+  BIC     r0, r0, #(0x1 << 11)
+  MCR     p15, 0, r0, c1, c0, 0
 
-@; The MMU is enabled later, before calling main().  Caches and branch prediction are enabled inside main(),
-@; after the MMU has been enabled and scatterloading has been performed.
-@
-@  ;
-@  ; Setup stacks
-@  ;---------------
+  // Read CPU ID -> r0
+  MRC     p15, 0, r0, c0, c0, 5
+  ANDS    r0, r0, #0x03
 
-  MRC     p15, 0, r0, c0, c0, 5       @ Read CPU ID register
-  ANDS    r0, r0, #0x03               @ Mask off, leaving the CPU ID field
+  // Set per-core stacks: sp = __xxx_stack - CPU_ID * (total_size / 2)
 
-@; Stack symbols point to the TOP of the total stack area (defined in lscript.ld).
-@; Each core offsets downward by CPU_ID * per_core_slice.
+  // IRQ stack
+  MOV     r1, #IRQ_MODE
+  MSR     CPSR_c, r1
+  LDR     r1, =__irq_stack
+  LDR     r3, =_IRQ_STACK_SIZE
+  LSR     r3, r3, #1                  // per_core = total / 2
+  MUL     r3, r0, r3                  // offset = CPU_ID * per_core
+  SUB     sp, r1, r3
 
-  MOV     r1, #IRQ_MODE                         @ Build IRQ mode CPSR
-  MSR     CPSR_c, r1                            @ Enter IRQ mode
-  LDR     r1, =__irq_stack                      @ IRQ stacks for CPU 0,1
-  SUB     r1, r1, r0, LSL #11                   @ CPU_ID * 0x800 (IRQ_STACK_PER_CORE)
+  // SVC stack
+  MOV     r1, #SVC_MODE
+  MSR     CPSR_c, r1
+  LDR     r1, =__supervisor_stack
+  LDR     r3, =_SUPERVISOR_STACK_SIZE
+  LSR     r3, r3, #1
+  MUL     r3, r0, r3
+  SUB     sp, r1, r3
+
+  // ABT stack (shared)
+  MOV     r1, #ABT_MODE
+  MSR     CPSR_c, r1
+  LDR     r1, =__abort_stack
   MOV     sp, r1
 
-  MOV     r1, #SVC_MODE                         @ Build SVC mode CPSR
-  MSR     CPSR_c, r1                            @ Enter SVC mode
-  LDR     r1, =__supervisor_stack               @ SVC stacks for CPU 0,1
-  SUB     r1, r1, r0, LSL #12                   @ CPU_ID * 0x1000 (SVC_STACK_PER_CORE)
+  // FIQ stack (shared)
+  MOV     r1, #FIQ_MODE
+  MSR     CPSR_c, r1
+  LDR     r1, =__fiq_stack
   MOV     sp, r1
 
-  MOV     r1, #ABT_MODE                         @ Build ABT mode CPSR
-  MSR     CPSR_c, r1                            @ Enter ABT mode
-  LDR     r1, =__abort_stack                    @ ABORT stack (shared, debug only)
-  MOV     sp, r1
+  // SYS stack
+  MOV     r1, #SYS_MODE
+  MSR     CPSR_c, r1
+  LDR     r1, =__stack
+  LDR     r3, =_STACK_SIZE
+  LSR     r3, r3, #1
+  MUL     r3, r0, r3
+  SUB     sp, r1, r3
 
-  MOV     r1, #FIQ_MODE                         @ Build FIQ mode CPSR
-  MSR     CPSR_c, r1                            @ Enter FIQ mode
-  LDR     r1, =__fiq_stack                      @ FIQ stack (shared, debug only)
-  MOV     sp, r1
-
-  MOV     r1, #SYS_MODE                         @ Build SYS mode CPSR
-  MSR     CPSR_c, r1                            @ Enter SYS mode
-  LDR     r1, =__stack                          @ App stacks for all CPUs
-  SUB     r1, r1, r0, LSL #12                   @ CPU_ID * 0x1000 (SYS_STACK_PER_CORE)
-  MOV     sp, r1
-
-@; Switch back to SVC mode for ThreadX kernel (SYS mode has no SPSR,
-@; which breaks the interrupt-return dispatch path in _tx_thread_schedule)
+  // Switch to SVC mode for ThreadX
   MOV     r1, #SVC_MODE
   MSR     CPSR_c, r1
 
-@  ;
-@  ; Set vector base address
-@  ; ------------------------
+  // Set VBAR
   LDR     r0, =_vector_table
-  MCR     p15, 0, r0, c12, c0, 0 @ Write Secure or Non-secure Vector Base Address
-  BL      disableHighVecs @ Ensure that V-bit is cleared
+  MCR     p15, 0, r0, c12, c0, 0
+  BL      disableHighVecs
 
-@  ;
-@  ; Invalidate caches
-@  ; ------------------
+  // Invalidate caches and TLB
   BL      invalidateCaches
-
-@  ;
-@  ; Clear Branch Prediction Array
-@  ; ------------------------------
   MOV     r0, #0x0
-  MCR     p15, 0, r0, c7, c5, 6     @ BPIALL - Invalidate entire branch predictor array
-
-@
-@  ; Invalidate TLBs
-@  ;------------------
+  MCR     p15, 0, r0, c7, c5, 6      // invalidate branch predictor
   MOV     r0, #0x0
-  MCR     p15, 0, r0, c8, c7, 0     @ TLBIALL - Invalidate entire Unified TLB
+  MCR     p15, 0, r0, c8, c7, 0      // invalidate TLB
 
-@  ;
-@  ; Set up Domain Access Control Reg
-@  ; ----------------------------------
-@  ; b00 - No Access (abort)
-@  ; b01 - Client (respect table entry)
-@  ; b10 - RESERVED
-@  ; b11 - Manager (ignore access permissions)
+  // Domain Access Control: all domains = client
+  MRC     p15, 0, r0, c3, c0, 0
+  LDR     r0, =0x55555555
+  MCR     p15, 0, r0, c3, c0, 0
 
-  MRC     p15, 0, r0, c3, c0, 0      @ Read Domain Access Control Register
-  LDR     r0, =0x55555555            @ Initialize every domain entry to b01 (client)
-  MCR     p15, 0, r0, c3, c0, 0      @ Write Domain Access Control Register
-
-@  ;
-@  ; Set TTB0 to shared MMUTable (from BSP translation_table.S)
-@  ; -----------------------------------------------------------
-@  ; All cores share the same page table for Zynq 7010 SMP.
-@  ; The BSP translation_table.S pre-populates all Zynq address mappings.
-@  ;
+  // Set TTB0 to shared MMUTable
   LDR     r0, =MMUTable
-  ORR     r0, r0, #0x5B              @ Outer write-back cacheable, inner non-cacheable
+  ORR     r0, r0, #0x5B
   MCR     p15, 0, r0, c2, c0, 0
-
-@  ;
-@  ; Barrier
-@  ; --------
   DSB
 
-@  ;
-@  ; Enable MMU
-@  ;-------------
-@  ; Leaving the caches disabled until later.
-  MRC     p15, 0, r0, c1, c0, 0       @ Read CP15 System Control register
-  BIC     r0, r0, #(0x1 << 12)        @ Clear I bit 12 to disable I Cache
-  BIC     r0, r0, #(0x1 <<  2)        @ Clear C bit  2 to disable D Cache
-  BIC     r0, r0, #0x2                @ Clear A bit  1 to disable strict alignment fault checking
-  ORR     r0, r0, #0x1                @ Set M bit 0 to enable MMU before scatter loading
-  MCR     p15, 0, r0, c1, c0, 0       @ Write CP15 System Control register
+  // Enable MMU (caches still off)
+  MRC     p15, 0, r0, c1, c0, 0
+  BIC     r0, r0, #(0x1 << 12)
+  BIC     r0, r0, #(0x1 <<  2)
+  BIC     r0, r0, #0x2
+  ORR     r0, r0, #0x1
+  MCR     p15, 0, r0, c1, c0, 0
   DSB
   ISB
 
-@  ;
-@  ; MMU now enabled - Virtual address system now active
-@  ;
-
-@  ;
-@  ; Enable VFP
-@  ; ------------
-  MRC     p15, 0, r1, c1, c0, 2               @ r1 = Access Control Register
-  ORR     r1, r1, #(0xf << 20)                @ Enable full access for p10,11
-  MCR     p15, 0, r1, c1, c0, 2               @ Access Control Register = r1
+  // Enable VFP
+  MRC     p15, 0, r1, c1, c0, 2
+  ORR     r1, r1, #(0xf << 20)
+  MCR     p15, 0, r1, c1, c0, 2
   ISB
-  MOV     r0, #VFPEnable                      @ Enable VFP itself
-  FMXR    FPEXC, r0                           @ FPEXC = r0
+  MOV     r0, #VFPEnable
+  FMXR    FPEXC, r0
 
-  LDR     r0, =_tx_thread_smp_release_cores_flag         @ Build address of release cores flag
+  // Clear release cores flag
+  LDR     r0, =_tx_thread_smp_release_cores_flag
   MOV     r1, #0
   STR     r1, [r0]
 
-@  ;
-@  ; SMP initialization
-@  ; -------------------
-  MRC     p15, 0, r0, c0, c0, 5     @ Read CPU ID register
-  ANDS    r0, r0, #0x03             @ Mask off, leaving the CPU ID field
+  // Branch by CPU ID
+  MRC     p15, 0, r0, c0, c0, 5
+  ANDS    r0, r0, #0x03
   BEQ     primaryCPUInit
   BNE     secondaryCPUsInit
 
 
 
-@; ------------------------------------------------------------
-@; Initialization for PRIMARY CPU
-@; ------------------------------------------------------------
-@
+// ============================================================
+// Primary CPU (core 0)
+// ============================================================
   .align 2
   .global primaryCPUInit
   .type   primaryCPUInit,function
 primaryCPUInit:
 
-@  ;
-@  ; SCU Initialization
-@  ; --------------------
+  // SCU init
   BL      enableSCU
   BL      enableMaintenanceBroadcast
 
-@  ;
-@  ; Invalidate SCU tag RAMs for both cores
-@  ; -----------------------------------------
-  MOV     r0, #0                       @ CPU 0
-  MOV     r1, #0x0F                    @ All ways
+  // Invalidate SCU tag RAMs for both cores
+  MOV     r0, #0
+  MOV     r1, #0x0F
   BL      secureSCUInvalidate
-  MOV     r0, #1                       @ CPU 1
-  MOV     r1, #0x0F                    @ All ways
+  MOV     r0, #1
+  MOV     r1, #0x0F
   BL      secureSCUInvalidate
 
-@  ;
-@  ; L2 Cache Initialization (PL310)
-@  ; ---------------------------------
-@
-@  ; Disable L2
+  // L2 Cache init (PL310)
   LDR     r0, =L2CCControl
   MOV     r1, #0
-  STR     r1, [r0]
+  STR     r1, [r0]                    // disable L2
 
-@  ; Configure auxiliary control register
   LDR     r0, =L2CCAuxControl
   LDR     r1, [r0]
   LDR     r2, =L2CCAuxControlVal
   ORR     r1, r1, r2
   STR     r1, [r0]
 
-@  ; Configure TAG latency
   LDR     r0, =L2CCTAGLatReg
   LDR     r1, =L2CCTAGLatency
   STR     r1, [r0]
 
-@  ; Configure DATA latency
   LDR     r0, =L2CCDataLatReg
   LDR     r1, =L2CCDataLatency
   STR     r1, [r0]
 
-@  ; Invalidate all L2 ways
   LDR     r0, =L2CCWay
   LDR     r2, =0xFFFF
-  STR     r2, [r0]
+  STR     r2, [r0]                    // invalidate all ways
 
-@  ; Wait for invalidate to complete
   LDR     r0, =L2CCSync
 l2_sync_wait:
   LDR     r1, [r0]
   CMP     r1, #0
   BNE     l2_sync_wait
 
-@  ; Clear pending L2 interrupts
   LDR     r0, =L2CCIntRaw
   LDR     r1, [r0]
   LDR     r0, =L2CCIntClear
   STR     r1, [r0]
 
-@  ; Configure SLCR L2C RAM
+  // Configure SLCR L2C RAM
   LDR     r0, =SLCRUnlockReg
   LDR     r1, =SLCRUnlockKey
   STR     r1, [r0]
@@ -437,92 +332,70 @@ l2_sync_wait:
   LDR     r1, =SLCRlockKey
   STR     r1, [r0]
 
-@  ; Enable L2 cache
+  // Enable L2 cache
   LDR     r0, =L2CCControl
   LDR     r1, [r0]
   MOV     r2, #L2CCControlVal
   ORR     r1, r1, r2
   STR     r1, [r0]
 
-@  ;
-@  ; Enable caches and branch prediction
-@  ; --------------------------------------
+  // Enable caches + branch prediction + prefetch
   BL      enableCaches
 
-@  ; Enable branch prediction
-  MRC     p15, 0, r0, c1, c0, 0
+  MRC     p15, 0, r0, c1, c0, 0       // branch prediction
   ORR     r0, r0, #(0x1 << 11)
   MCR     p15, 0, r0, c1, c0, 0
 
-@  ; Enable D-side prefetch and L2 prefetch hint
-  MRC     p15, 0, r0, c1, c0, 1
-  ORR     r0, r0, #(0x1 << 2)         @ D-side prefetch
-  ORR     r0, r0, #(0x1 << 1)         @ L2 prefetch hint
+  MRC     p15, 0, r0, c1, c0, 1       // D-side + L2 prefetch
+  ORR     r0, r0, #(0x1 << 2)
+  ORR     r0, r0, #(0x1 << 1)
   MCR     p15, 0, r0, c1, c0, 1
 
-@  ;
-@  ; Start CPU1
-@  ; ------------
-@  ; Write entry point to CPU1 start address (Zynq TRM: 0xFFFFFFF0)
-@  ; 0xFFFFFFF0 is in OCM mapped as cacheable. Must push the write
-@  ; to physical memory so CPU1 (caches off, boot ROM state) can see it.
+  // Start CPU1: write entry to 0xFFFFFFF0 + clean + SEV
   LDR     r0, =CPU1_START_ADDR
   LDR     r1, =_vector_table
   STR     r1, [r0]
-  MCR     p15, 0, r0, c7, c10, 1       @ DCCMVAC: clean cache line to PoC
-  DSB                                  @ Wait for clean to complete
-  SEV                                  @ Wake CPU1 from WFE
+  MCR     p15, 0, r0, c7, c10, 1      // DCCMVAC
+  DSB
+  SEV
 
-@  ;
-@  ; Branch to C lib code
-@  ; ----------------------
   B       _start
 
 
 
-@; ------------------------------------------------------------
-@; Initialization for SECONDARY CPUs
-@; ------------------------------------------------------------
-@
+// ============================================================
+// Secondary CPUs (core 1)
+// GIC config uses CP15 addressing (no C global variable dependency)
+// ============================================================
   .align 2
   .global secondaryCPUsInit
   .type   secondaryCPUsInit,function
 secondaryCPUsInit:
 
-@  ;
-@  ; GIC Init
-@  ; ---------
   BL      enableGICProcessorInterface
 
-  MOV     r0, #0xF0                 @ Priority mask (0xF0 = Xilinx default)
+  MOV     r0, #0xF0
   BL      setPriorityMask
 
-@  ;
-@  ; Enable SGI for inter-core interrupts
-@  ; --------------------------------------
-  MOV     r0, #0                     @ SGI ID 0 (inter-core)
+  MOV     r0, #0                      // SGI 0
   BL      enableIntID
 
-  MOV     r0, #0                     @ SGI ID 0 (inter-core)
-  MOV     r1, #0                    @ Priority
+  MOV     r0, #0
+  MOV     r1, #0
   BL      setIntPriority
 
-@  ;
-@  ; Enable caches
-@  ; ---------------
   BL      enableCaches
 
-@  ;
-@  ; Branch to ThreadX SMP wait loop
-@  ; ---------------------------------
+  // Branch prediction + prefetch (match primaryCPUInit)
+  MRC     p15, 0, r0, c1, c0, 0
+  ORR     r0, r0, #(0x1 << 11)
+  MCR     p15, 0, r0, c1, c0, 0
+
+  MRC     p15, 0, r0, c1, c0, 1
+  ORR     r0, r0, #(0x1 << 2)
+  ORR     r0, r0, #(0x1 << 1)
+  MCR     p15, 0, r0, c1, c0, 1
+
   B       _tx_thread_smp_initialize_wait
 
-
-@; ------------------------------------------------------------
-@; End of code
-@; ------------------------------------------------------------
-
-@; ------------------------------------------------------------
-@; End of startup.S
-@; ------------------------------------------------------------
   .end

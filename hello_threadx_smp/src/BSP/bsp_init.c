@@ -1,14 +1,16 @@
 #include "bsp_init.h"
 #include "xparameters.h"
-#include "app_print.h"
+#include "xscutimer.h"
 
 #define GTIMER_COUNTER_LO   (*(volatile u32 *)0xF8F00200)
 #define GTIMER_COUNTER_HI   (*(volatile u32 *)0xF8F00204)
 #define GTIMER_CONTROL      (*(volatile u32 *)0xF8F00208)
+#define SCU_RELOAD_CNT		(XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ/2/100)			//10ms
 
 XScuGic xInterruptController;
+static XScuTimer xScuTimer;
 
-/* 只使用1个32bit的值用作性能测试 */
+// Global Timer init (free-running, used by execution profile)
 static void Global_Timer_Init()
 {
 	GTIMER_CONTROL    = 0x00;
@@ -17,12 +19,7 @@ static void Global_Timer_Init()
 	GTIMER_CONTROL    = 0x01;
 }
 
-
-/*
- * GIC初始化
- * 主要是需要一个vector的table
- * 其他的操作会和tx_initialize_low_level中的部分重合
- */
+// GIC init (also enables Distributor + CPU Interface + priority mask)
 static void GIC_Init()
 {
 	XScuGic_Config *intc_cfg;
@@ -30,9 +27,7 @@ static void GIC_Init()
 	XScuGic_CfgInitialize(&xInterruptController, intc_cfg, intc_cfg->CpuBaseAddress);
 }
 
-/*
- * 中断分发函数(汇编by_pass_timer_interrupt调用)
- */
+// Dispatch non-timer IRQs via XScuGic HandlerTable
 void tx_irq_dispatch(unsigned int int_id)
 {
 	extern XScuGic xInterruptController;
@@ -45,10 +40,29 @@ void tx_irq_dispatch(unsigned int int_id)
 	}
 }
 
-
+// Private Timer: 3333333 ticks @ 333 MHz = 10 ms period
+static void PrivateTimer_Init(void)
+{
+	XScuTimer_Config *cfg = XScuTimer_LookupConfig(XPAR_XSCUTIMER_0_DEVICE_ID);
+	XScuTimer_CfgInitialize(&xScuTimer, cfg, cfg->BaseAddr);
+	XScuTimer_LoadTimer(&xScuTimer, SCU_RELOAD_CNT);
+	XScuTimer_EnableAutoReload(&xScuTimer);
+	XScuTimer_EnableInterrupt(&xScuTimer);
+	XScuTimer_Start(&xScuTimer);
+}
 
 void bsp_init()
 {
 	Global_Timer_Init();
 	GIC_Init();
+
+	// Enable Private Timer interrupt (PPI 29)
+	XScuGic_SetPriorityTriggerType(&xInterruptController, 29, 0, 0);
+	XScuGic_Enable(&xInterruptController, 29);
+
+	PrivateTimer_Init();
+
+	// Enable SGI 0 for inter-core interrupts
+	XScuGic_SetPriorityTriggerType(&xInterruptController, 0, 0, 0);
+	XScuGic_Enable(&xInterruptController, 0);
 }
