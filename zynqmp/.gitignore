@@ -1,0 +1,43 @@
+# Vitis IDE workspace files
+.metadata/
+.analytics
+IDE.log
+RemoteSystemsTempFiles/
+
+# Build outputs
+Debug/
+Release/
+**/Debug/
+**/Release/
+
+# Compiled object files
+*.o
+*.d
+*.elf
+*.elf.size
+*.bin
+*.bit
+
+# Generated build files
+*.build.ui.log
+
+# Vitis platform export (generated from hardware design)
+**/export/
+
+# Log files
+**/.log/
+logs/
+
+# Lock files
+.lock
+
+# claude (but track skills)
+.claude/*
+!.claude/skills/
+
+# opencode (but track skills)
+.opencode/*
+!.opencode/skills/
+
+# tarcex-file
+*.trx

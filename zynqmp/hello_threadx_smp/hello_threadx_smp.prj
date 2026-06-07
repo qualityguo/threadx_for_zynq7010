@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="ASCII"?>
+<sdkproject:SdkProject xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:sdkproject="http://www.xilinx.com/sdkproject" name="hello_threadx_smp" location="D:/RTOS_Study/threadx/vitis/zynqmp/hello_threadx_smp" platform="D:/RTOS_Study/threadx/vitis/zynqmp/zynq7eg/export/zynq7eg/zynq7eg.xpfm" platformUID="xilinx:::0.0(custom)" systemProject="hello_threadx_smp_system" sysConfig="zynq7eg" runtime="C/C++" cpu="standalone_domain" cpuInstance="psu_cortexa53_0" os="standalone" mssSignature="d341818db81a3359d0bbee978a830003">
+  <configuration name="Debug" id="xilinx.gnu.arm.a53.exe.debug.1057083705">
+    <configBuildOptions xsi:type="sdkproject:SdkOptions"/>
+    <lastBuildOptions xsi:type="sdkproject:SdkOptions"/>
+  </configuration>
+  <configuration name="Release" id="xilinx.gnu.arm.a53.exe.release.885464727" dirty="true">
+    <configBuildOptions xsi:type="sdkproject:SdkOptions"/>
+  </configuration>
+  <template appTemplateName="empty_application"/>
+</sdkproject:SdkProject>
