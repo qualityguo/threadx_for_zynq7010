@@ -9,7 +9,6 @@ ThreadX 全家桶（v6.4.1）在 Xilinx Zynq 平台上的移植与开发工程�
 | [zynq7000/](zynq7000/) | Zynq-7010（双核 Cortex-A9） | ThreadX、FileX、NetXDuo、SMP 移植 |
 | [zynqmp/](zynqmp/) | Zynq UltraScale+（四核 Cortex-A53） | ThreadX、SMP 移植 |
 | [jtag_tool/](jtag_tool/) | 通用 | JTAG UART 终端调试和 TraceX 导出 GUI 工具 |
-| [Packages/](Packages/) | — | ThreadX 源码包（子模块） |
 
 ### 已完成功能
 
